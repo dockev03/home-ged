@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/" />
+  <Folder Name="/src/back/">
+    <Project Path="src/back/HomeGed.Api/HomeGed.Api.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/HomeGed.Api.Tests/HomeGed.Api.Tests.csproj" />
+    <Project Path="tests/HomeGed.IntegrationTests/HomeGed.IntegrationTests.csproj" />
+  </Folder>
+</Solution>

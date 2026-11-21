@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <RootNamespace>HomeGed.Api</RootNamespace>
+    <!-- Le front buildé (src/front/dist) est copié dans wwwroot par le Dockerfile. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="HomeGed.Api.Tests" />
+  </ItemGroup>
+
+</Project>

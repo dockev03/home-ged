@@ -1,0 +1,128 @@
+# CI Home-GED : build, tests, format, puis images Docker publiées sur GHCR.
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: "1"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+
+jobs:
+  back:
+    name: Back (.NET)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+      - run: dotnet restore HomeGed.slnx
+      - run: dotnet build HomeGed.slnx --no-restore --configuration Release
+      - name: Format
+        run: dotnet format HomeGed.slnx --no-restore --verify-no-changes
+      - name: Tests unitaires
+        run: dotnet test tests/HomeGed.Api.Tests --no-build --configuration Release
+
+  front:
+    name: Front (Vue)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/front
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: src/front/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run lint
+      - run: npm test
+      - name: Typage et build
+        run: npm run build
+
+  integration:
+    name: Intégration (Paperless réel)
+    runs-on: ubuntu-latest
+    # Même version que deploy/docker-compose.yml : à faire évoluer ensemble.
+    services:
+      broker:
+        image: docker.io/valkey/valkey:9-alpine
+      paperless:
+        image: ghcr.io/paperless-ngx/paperless-ngx:3.5.1
+        ports: ["8000:8000"]
+        env:
+          PAPERLESS_REDIS: redis://broker:6379
+          PAPERLESS_SECRET_KEY: ci-uniquement
+          PAPERLESS_URL: http://localhost:8000
+          PAPERLESS_BIND_ADDR: 0.0.0.0
+        options: >-
+          --health-cmd "curl -fs http://localhost:8000/ -o /dev/null"
+          --health-interval 10s --health-timeout 5s --health-retries 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+      - name: Tests d'intégration
+        run: dotnet test tests/HomeGed.IntegrationTests --configuration Release
+        env:
+          PAPERLESS_URL: http://localhost:8000
+
+  images:
+    name: Images ${{ matrix.image.name }}
+    needs: [back, front, integration]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        image:
+          - { name: home-ged, context: ., file: Dockerfile }
+          - { name: home-ged-backup, context: deploy/backup, file: deploy/backup/Dockerfile }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+      - name: Connexion à GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image.name }}
+          # main → « main » et « sha-xxxxxxx » ; tag v1.2.3 → « 1.2.3 » et « 1.2 ».
+          tags: |
+            type=ref,event=branch
+            type=sha,enable=${{ github.event_name != 'pull_request' }}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=ref,event=pr
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.image.context }}
+          file: ${{ matrix.image.file }}
+          # Sur une pull request : build seul, pour valider le Dockerfile.
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: VERSION=${{ steps.meta.outputs.version }}
+          cache-from: type=gha,scope=${{ matrix.image.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}
