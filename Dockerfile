@@ -9,7 +9,7 @@ COPY src/front/ ./
 RUN npm run build
 
 # --- 2. Back ---------------------------------------------------------------
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS back
+FROM mcr.microsoft.com/dotnet/sdk:11.0 AS back
 WORKDIR /src
 COPY Directory.Build.props .editorconfig ./
 COPY src/back/HomeGed.Api/HomeGed.Api.csproj src/back/HomeGed.Api/
