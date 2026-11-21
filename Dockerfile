@@ -1,7 +1,7 @@
 # Image Home-GED : le BFF ASP.NET Core sert le front Vue buildé (une seule image).
 
 # --- 1. Front --------------------------------------------------------------
-FROM docker.io/library/node:22-alpine AS front
+FROM docker.io/library/node:26-alpine AS front
 WORKDIR /src
 COPY src/front/package.json src/front/package-lock.json ./
 RUN npm ci --no-audit --no-fund
