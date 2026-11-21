@@ -19,6 +19,15 @@ L'étude des solutions existantes montre que **Paperless-ngx 3.x** couvre enviro
 
 Home-GED ne réimplémente **aucune** fonction déjà fournie par Paperless. Elle passe exclusivement par son API REST.
 
+### Répartition des interfaces
+
+| Interface | Usage | Utilisateurs |
+|---|---|---|
+| **Home-GED** (UI/UX propre, Vue 3) | **Usage quotidien** : recherche, consultation, upload, scan, métadonnées, notes, versions, partage | Tout le foyer |
+| **Interface web Paperless** | **Administration ponctuelle** : utilisateurs et groupes, règles d'import mail, workflows (rappels, webhooks), définition des champs personnalisés, tâches de maintenance | Administrateur uniquement, accès restreint (voir §5) |
+
+Ces écrans d'administration ne sont pas reproduits dans Home-GED. Ils pourront l'être plus tard, via l'API, seulement si le besoin apparaît à l'usage.
+
 ## 2. Périmètre fonctionnel
 
 Les codes reprennent la grille de fonctionnalités validée (`FCT_HGED.xlsx`).
