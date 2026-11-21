@@ -218,9 +218,9 @@ Home-GED ne stocke **aucune donnée de document** (Paperless est la seule source
 
 | # | Sujet | À décider |
 |---|---|---|
-| 1 | **Dimensionnement du VPS** (vCPU, RAM, disque) | Paperless avec Tika et Gotenberg demande au moins 4 Go de RAM. **Ollama en CPU seul sur un VPS sera lent** : il faudra peut-être prévoir de l'héberger ailleurs ou d'utiliser un petit modèle pour la V2 |
-| 2 | Exposition de l'interface Paperless | Liste d'accès IP dans NPM, ou tunnel SSH uniquement |
+| 1 | ~~Dimensionnement du VPS~~ | **Tranché** : 4 vCPU, 8 Go RAM, 75 Go NVMe ; environ 20 Go de documents ; archive PDF/A limitée aux scans. Ollama (V2) à réévaluer : CPU seul, petit modèle |
+| 2 | ~~Exposition de l'interface Paperless~~ | **Tranché** : liste d'accès NPM limitée à l'IP fixe du domicile |
 | 3 | Alimentation du dossier surveillé (A3) sur le VPS | SFTP, Syncthing depuis le NAS, ou abandon au profit de l'import par e-mail et de la PWA |
-| 4 | Cible des sauvegardes | NAS du domicile, OVH Object Storage, ou les deux |
+| 4 | ~~Cible des sauvegardes~~ | **Tranché** : ReadyNAS 102 du domicile en SFTP (restic chiffré). Le NAS n'est plus mis à jour : son remplacement est à prévoir |
 | 5 | Boîte mail dédiée à l'import (A4) | Adresse et fournisseur |
 | 6 | Bibliothèque de composants Vue | Choix au lot 1 |

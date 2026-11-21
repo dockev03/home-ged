@@ -1,0 +1,187 @@
+# Home-GED — étape 0 : Paperless-ngx et sauvegardes
+#
+# Déploiement : stack Portainer (ou `docker compose up -d` dans ce dossier).
+# Configuration : variables d'environnement, voir `.env.example`.
+# Documentation : docs/deploiement/
+#
+# Aucun port n'est publié sur l'hôte : seul Nginx Proxy Manager joint Paperless,
+# via le réseau Docker externe `${NPM_NETWORK}`.
+
+name: home-ged
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  broker:
+    image: docker.io/valkey/valkey:9-alpine
+    restart: unless-stopped
+    networks: [ged]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits: { memory: 256m }
+    logging: *logging
+
+  db:
+    image: docker.io/library/postgres:18-alpine
+    restart: unless-stopped
+    networks: [ged]
+    volumes:
+      - pgdata:/var/lib/postgresql
+    environment:
+      POSTGRES_DB: paperless
+      POSTGRES_USER: paperless
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD manquant}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U paperless -d paperless"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits: { memory: 1g }
+    logging: *logging
+
+  webserver:
+    image: ghcr.io/paperless-ngx/paperless-ngx:3.5.1
+    restart: unless-stopped
+    depends_on:
+      db: { condition: service_healthy }
+      broker: { condition: service_healthy }
+      gotenberg: { condition: service_started }
+      tika: { condition: service_started }
+    networks:
+      ged:
+      proxy:
+        aliases: [paperless]
+    volumes:
+      - data:/usr/src/paperless/data
+      - media:/usr/src/paperless/media
+      - consume:/usr/src/paperless/consume
+      - export:/usr/src/paperless/export
+    environment:
+      # Infrastructure
+      PAPERLESS_REDIS: redis://broker:6379
+      PAPERLESS_DBENGINE: postgresql
+      PAPERLESS_DBHOST: db
+      PAPERLESS_DBUSER: paperless
+      PAPERLESS_DBPASS: ${POSTGRES_PASSWORD}
+      PAPERLESS_TIKA_ENABLED: "true"
+      PAPERLESS_TIKA_ENDPOINT: http://tika:9998
+      PAPERLESS_TIKA_GOTENBERG_ENDPOINT: http://gotenberg:3000
+      # Sécurité et reverse proxy
+      PAPERLESS_SECRET_KEY: ${PAPERLESS_SECRET_KEY:?PAPERLESS_SECRET_KEY manquant}
+      PAPERLESS_URL: ${PAPERLESS_URL:?PAPERLESS_URL manquant}
+      # Écoute IPv4 seulement : NPM le joint par le réseau Docker, IPv6 inutile.
+      PAPERLESS_BIND_ADDR: 0.0.0.0
+      PAPERLESS_PROXY_SSL_HEADER: '["HTTP_X_FORWARDED_PROTO", "https"]'
+      PAPERLESS_ACCOUNT_ALLOW_SIGNUPS: "false"
+      PAPERLESS_TOKEN_THROTTLE_RATE: 5/min
+      # Langue et fuseau
+      PAPERLESS_TIME_ZONE: Europe/Paris
+      PAPERLESS_OCR_LANGUAGE: fra+eng
+      # OCR et archive : OCR uniquement si le document n'a pas de texte,
+      # archive PDF/A uniquement pour les scans et photos (économie de disque).
+      PAPERLESS_OCR_MODE: auto
+      PAPERLESS_ARCHIVE_FILE_GENERATION: auto
+      # Ressources (4 vCPU : 2 workers x 1 thread, marge pour le reste)
+      PAPERLESS_TASK_WORKERS: 2
+      PAPERLESS_THREADS_PER_WORKER: 1
+      PAPERLESS_WEBSERVER_WORKERS: 1
+      # E-mails sortants (rappels d'échéance, F1/F2)
+      PAPERLESS_EMAIL_HOST: ${SMTP_HOST:-}
+      PAPERLESS_EMAIL_PORT: ${SMTP_PORT:-587}
+      PAPERLESS_EMAIL_HOST_USER: ${SMTP_USER:-}
+      PAPERLESS_EMAIL_HOST_PASSWORD: ${SMTP_PASSWORD:-}
+      PAPERLESS_EMAIL_FROM: ${SMTP_FROM:-}
+      PAPERLESS_EMAIL_USE_TLS: ${SMTP_USE_TLS:-true}
+    # Healthcheck fourni par l'image (HTTP sur le port 8000).
+    deploy:
+      resources:
+        limits: { memory: 2g }
+    logging: *logging
+
+  gotenberg:
+    image: docker.io/gotenberg/gotenberg:8.38
+    restart: unless-stopped
+    networks: [ged]
+    # Conversion des .eml : pas de JavaScript ni de contenu externe.
+    command:
+      - "gotenberg"
+      - "--chromium-disable-javascript=true"
+      - "--chromium-allow-list=^file:///tmp/.*"
+    deploy:
+      resources:
+        limits: { memory: 1g }
+    logging: *logging
+
+  tika:
+    # Ne pas passer en Tika 4 : les endpoints utilisés par Paperless y ont été retirés.
+    image: docker.io/apache/tika:3.3.1.0
+    restart: unless-stopped
+    networks: [ged]
+    deploy:
+      resources:
+        limits: { memory: 1g }
+    logging: *logging
+
+  backup:
+    image: home-ged-backup:1
+    build: ./backup
+    # Nom d'hôte fixe : restic regroupe les snapshots par hôte pour la rétention.
+    hostname: home-ged-backup
+    restart: unless-stopped
+    depends_on:
+      db: { condition: service_healthy }
+    networks: [ged]
+    volumes:
+      - data:/source/data:ro
+      - media:/source/media:ro
+      - ${BACKUP_SSH_DIR:-/opt/home-ged/backup-ssh}:/ssh:ro
+      - restic-cache:/cache
+    environment:
+      TZ: Europe/Paris
+      BACKUP_CRON: ${BACKUP_CRON:-30 2 * * *}
+      PGHOST: db
+      PGUSER: paperless
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PG_DATABASES: paperless
+      RESTIC_REPOSITORY: ${RESTIC_REPOSITORY:?RESTIC_REPOSITORY manquant}
+      RESTIC_PASSWORD: ${RESTIC_PASSWORD:?RESTIC_PASSWORD manquant}
+      RESTIC_CACHE_DIR: /cache
+      SFTP_HOST: ${SFTP_HOST:-}
+      SFTP_PORT: ${SFTP_PORT:-22}
+      SFTP_USER: ${SFTP_USER:-backup-ged}
+      KEEP_DAILY: 7
+      KEEP_WEEKLY: 4
+      KEEP_MONTHLY: 12
+      HEALTHCHECK_URL: ${BACKUP_HEALTHCHECK_URL:-}
+    deploy:
+      resources:
+        limits: { memory: 512m }
+    logging: *logging
+
+networks:
+  ged:
+  proxy:
+    external: true
+    name: ${NPM_NETWORK:?NPM_NETWORK manquant}
+
+volumes:
+  data:
+  media:
+  consume:
+  export:
+  pgdata:
+  redisdata:
+  restic-cache:
