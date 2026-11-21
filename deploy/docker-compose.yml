@@ -1,11 +1,12 @@
-# Home-GED — étape 0 : Paperless-ngx et sauvegardes
+# Home-GED — Paperless-ngx, surcouche Home-GED et sauvegardes
 #
 # Déploiement : stack Portainer (ou `docker compose up -d` dans ce dossier).
 # Configuration : variables d'environnement, voir `.env.example`.
 # Documentation : docs/deploiement/
 #
-# Aucun port n'est publié sur l'hôte : seul Nginx Proxy Manager joint Paperless,
-# via le réseau Docker externe `${NPM_NETWORK}`.
+# Aucun port n'est publié sur l'hôte : seul Nginx Proxy Manager joint Home-GED et
+# Paperless, via le réseau Docker externe `${NPM_NETWORK}`.
+# Images Home-GED : publiées par la CI sur GHCR (paquets privés, voir docs/deploiement).
 
 name: home-ged
 
@@ -82,6 +83,9 @@ services:
       # Sécurité et reverse proxy
       PAPERLESS_SECRET_KEY: ${PAPERLESS_SECRET_KEY:?PAPERLESS_SECRET_KEY manquant}
       PAPERLESS_URL: ${PAPERLESS_URL:?PAPERLESS_URL manquant}
+      # Home-GED appelle l'API par le nom interne « webserver » ; l'hôte de
+      # PAPERLESS_URL et localhost sont ajoutés automatiquement par Paperless.
+      PAPERLESS_ALLOWED_HOSTS: webserver
       # Écoute IPv4 seulement : NPM le joint par le réseau Docker, IPv6 inutile.
       PAPERLESS_BIND_ADDR: 0.0.0.0
       PAPERLESS_PROXY_SSL_HEADER: '["HTTP_X_FORWARDED_PROTO", "https"]'
@@ -135,9 +139,33 @@ services:
         limits: { memory: 1g }
     logging: *logging
 
+  app:
+    image: ghcr.io/dockev03/home-ged:${HOMEGED_VERSION:?HOMEGED_VERSION manquant}
+    restart: unless-stopped
+    depends_on:
+      webserver: { condition: service_healthy }
+    networks:
+      ged:
+      proxy:
+        aliases: [home-ged]
+    environment:
+      Paperless__BaseUrl: http://webserver:8000
+      # Sous-réseau du réseau NPM : seul NPM peut fournir l'IP client (X-Forwarded-For).
+      ReverseProxy__KnownNetworks__0: ${NPM_SUBNET:?NPM_SUBNET manquant}
+    # Healthcheck fourni par l'image (/health). Conteneur durci : système de
+    # fichiers en lecture seule, aucune capacité Linux, pas d'élévation de droits.
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    deploy:
+      resources:
+        limits: { memory: 256m }
+    logging: *logging
+
   backup:
-    image: home-ged-backup:1
-    build: ./backup
+    # Construite et publiée par la CI (deploy/backup/Dockerfile).
+    image: ghcr.io/dockev03/home-ged-backup:${HOMEGED_VERSION:?HOMEGED_VERSION manquant}
     # Nom d'hôte fixe : restic regroupe les snapshots par hôte pour la rétention.
     hostname: home-ged-backup
     restart: unless-stopped

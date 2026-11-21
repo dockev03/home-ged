@@ -1,0 +1,26 @@
+# Mises à jour des dépendances (§4 Sécurité). Regroupées pour limiter le bruit.
+version: 2
+updates:
+  - package-ecosystem: nuget
+    directory: /
+    schedule: { interval: weekly, day: monday }
+    groups:
+      nuget: { patterns: ["*"] }
+
+  - package-ecosystem: npm
+    directory: /src/front
+    schedule: { interval: weekly, day: monday }
+    groups:
+      npm: { patterns: ["*"] }
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly, day: monday }
+    groups:
+      actions: { patterns: ["*"] }
+
+  # Images de base des Dockerfile. Paperless reste mis à jour à la main
+  # (montée de version volontaire après lecture du changelog, §3.4).
+  - package-ecosystem: docker
+    directories: ["/", "/deploy/backup"]
+    schedule: { interval: weekly, day: monday }
