@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatDate, formatRelative } from './dates'
+import { formatDate, formatRelative, formatShortDate } from './dates'
 
 const now = new Date('2026-11-22T12:00:00Z')
 const ago = (seconds: number) => new Date(now.getTime() - seconds * 1000)
@@ -20,5 +20,15 @@ describe('formatRelative', () => {
 describe('formatDate', () => {
   it('écrit la date en toutes lettres', () => {
     expect(formatDate('2026-12-22T10:00:00Z')).toBe('22 décembre 2026')
+  })
+})
+
+describe('formatShortDate', () => {
+  it('lit une date seule en heure locale', () => {
+    expect(formatShortDate('2026-11-22')).toBe('22 nov. 2026')
+  })
+
+  it('accepte une date ISO complète', () => {
+    expect(formatShortDate('2026-01-05T10:00:00+01:00')).toBe('5 janv. 2026')
   })
 })

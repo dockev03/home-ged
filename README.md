@@ -10,7 +10,7 @@ Surcouche web (PWA mobile-first) au-dessus de Paperless-ngx : recherche, consult
 | Dossier | Contenu |
 |---|---|
 | `src/back/HomeGed.Api` | BFF ASP.NET Core (.NET 10) : API, sessions, client Paperless ; sert le front buildé |
-| `src/front` | PWA Vue 3 + TypeScript + Vite, composants Naive UI |
+| `src/front` | PWA Vue 3 + TypeScript + Vite, styles Bootstrap 5 (CSS seul, composants interactifs en Vue) |
 | `tests/HomeGed.Api.Tests` | Tests unitaires du back |
 | `tests/HomeGed.IntegrationTests` | Tests contre un Paperless et un PostgreSQL réels (`PAPERLESS_URL`, `PAPERLESS_USER`, `PAPERLESS_PASSWORD`, `HOMEGED_DB`) |
 | `deploy` | Stack Docker Compose (Paperless, Home-GED, sauvegardes) |

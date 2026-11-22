@@ -226,7 +226,7 @@ Home-GED ne stocke **aucune donnée de document** (Paperless est la seule source
 | Lot | Contenu | Livrable |
 |---|---|---|
 | **0** ✅ | Déploiement de Paperless-ngx 3.x sur le VPS, configuration (utilisateurs, groupe Foyer, champ Personne, règles mail), sauvegardes restic et test de restauration | GED utilisable avec l'interface Paperless |
-| **1 (MVP)** | ✅ POC d'authentification (2FA), squelette Home-GED (Vue et .NET), CI et image GHCR, connexion. Puis : coque, liste et filtres (UI-01 à 03) ; fiche document (UI-04, 05) ; sélection multiple, upload, PWA installable, thème sombre (UI-06, PWA-01 à 03, PWA-07) | Interface quotidienne à l'ergonomie Paperless : consulter, rechercher, classer, ajouter |
+| **1 (MVP)** | ✅ POC d'authentification (2FA), squelette Home-GED (Vue et .NET), CI et image GHCR, connexion ; coque, liste et filtres (UI-01 à 03). Puis : fiche document (UI-04, 05) ; sélection multiple, upload, PWA installable, thème sombre (UI-06, PWA-01 à 03, PWA-07) | Interface quotidienne à l'ergonomie Paperless : consulter, rechercher, classer, ajouter |
 | **2** | Gérer, vues sauvegardées, tableau de bord, corbeille, documents ouverts, suggestions (UI-07 à 12) | Plus besoin de l'interface Paperless hors administration |
 | **3** | Liens de partage protégés (SHARE-01 à 07) | Partage sécurisé |
 | **4** | Capture caméra (SCAN-01 à 06) | Scan depuis le téléphone |

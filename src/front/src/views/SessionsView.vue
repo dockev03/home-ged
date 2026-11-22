@@ -1,10 +1,8 @@
 <script setup lang="ts">
-import { NAlert, NButton, NCard, NSpin, NTag, NText } from 'naive-ui'
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ApiError } from '../api/http'
 import { listSessions, revokeSession, type SessionInfo } from '../api/sessions'
-import AppHeader from '../components/AppHeader.vue'
 import { formatDate, formatDateTime, formatRelative } from '../format/dates'
 import { describeDevice } from '../format/device'
 import { useAuthStore } from '../stores/auth'
@@ -66,27 +64,31 @@ onMounted(load)
 </script>
 
 <template>
-  <AppHeader retour />
-  <main class="sessions">
-    <h1>Mes sessions</h1>
-    <NText depth="3">
+  <div class="sessions">
+    <h1 class="h3">Mes sessions</h1>
+    <p class="text-body-secondary mb-0">
       Appareils connectés à votre compte. Révoquez une session que vous ne reconnaissez pas ou un appareil perdu.
-    </NText>
+    </p>
 
-    <NAlert v-if="loadError" type="error" :show-icon="false">
-      {{ loadError }}
-      <NButton text type="primary" class="reessayer" @click="load">Réessayer</NButton>
-    </NAlert>
-    <NAlert v-if="actionError" type="error" closable @close="actionError = null">{{ actionError }}</NAlert>
+    <div v-if="loadError" class="alert alert-danger d-flex align-items-center gap-2" role="alert">
+      <span class="me-auto">{{ loadError }}</span>
+      <button type="button" class="btn btn-sm btn-outline-danger" @click="load">Réessayer</button>
+    </div>
+    <div v-if="actionError" class="alert alert-danger alert-dismissible erreur-action" role="alert">
+      {{ actionError }}
+      <button type="button" class="btn-close" aria-label="Fermer" @click="actionError = null" />
+    </div>
 
-    <NSpin v-if="sessions === null && !loadError" class="chargement" />
+    <div v-if="sessions === null && !loadError" class="chargement">
+      <span class="spinner-border" role="status"><span class="visually-hidden">Chargement…</span></span>
+    </div>
 
     <ul v-if="sessions" class="liste">
-      <li v-for="session in sorted" :key="session.id">
-        <NCard size="small" :data-session="session.id">
+      <li v-for="session in sorted" :key="session.id" class="card" :data-session="session.id">
+        <div class="card-body">
           <div class="entete">
             <strong>{{ describeDevice(session.userAgent) }}</strong>
-            <NTag v-if="session.current" type="success" size="small" round>Cet appareil</NTag>
+            <span v-if="session.current" class="badge rounded-pill text-bg-success">Cet appareil</span>
           </div>
           <dl class="details">
             <dt>Dernière activité</dt>
@@ -100,21 +102,22 @@ onMounted(load)
           </dl>
 
           <div v-if="confirming === session.id" class="actions" role="group" aria-label="Confirmer la révocation">
-            <NText class="question">{{ session.current ? 'Cet appareil sera déconnecté.' : 'Révoquer cette session ?' }}</NText>
-            <NButton size="large" @click="confirming = null">Annuler</NButton>
-            <NButton size="large" type="error" :loading="revoking === session.id" @click="revoke(session)">
+            <span class="question">{{ session.current ? 'Cet appareil sera déconnecté.' : 'Révoquer cette session ?' }}</span>
+            <button type="button" class="btn btn-outline-secondary" @click="confirming = null">Annuler</button>
+            <button type="button" class="btn btn-danger" :disabled="revoking === session.id" @click="revoke(session)">
+              <span v-if="revoking === session.id" class="spinner-border spinner-border-sm me-1" aria-hidden="true" />
               Confirmer
-            </NButton>
+            </button>
           </div>
           <div v-else class="actions">
-            <NButton size="large" secondary type="error" @click="confirming = session.id">
+            <button type="button" class="btn btn-outline-danger" @click="confirming = session.id">
               {{ session.current ? 'Révoquer (se déconnecter)' : 'Révoquer' }}
-            </NButton>
+            </button>
           </div>
-        </NCard>
+        </div>
       </li>
     </ul>
-  </main>
+  </div>
 </template>
 
 <style scoped>
@@ -123,12 +126,6 @@ onMounted(load)
   flex-direction: column;
   gap: 1rem;
   max-width: 40rem;
-  margin: 0 auto;
-  padding: 0 1rem 2rem;
-}
-
-h1 {
-  margin: 0.5rem 0 0;
 }
 
 .liste {
@@ -156,7 +153,8 @@ h1 {
 }
 
 .details dt {
-  opacity: 0.7;
+  font-weight: normal;
+  color: var(--bs-secondary-color);
 }
 
 .details dd {
@@ -180,9 +178,5 @@ h1 {
 .chargement {
   align-self: center;
   padding: 2rem;
-}
-
-.reessayer {
-  margin-left: 0.5rem;
 }
 </style>

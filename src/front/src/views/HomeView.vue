@@ -1,8 +1,6 @@
 <script setup lang="ts">
-import { NEmpty, NText } from 'naive-ui'
 import { onMounted, ref } from 'vue'
 import { getAppInfo } from '../api/http'
-import AppHeader from '../components/AppHeader.vue'
 
 const version = ref<string | null>(null)
 
@@ -16,24 +14,26 @@ onMounted(async () => {
 </script>
 
 <template>
-  <AppHeader />
-  <main class="accueil">
-    <h1>Home-GED</h1>
-    <NEmpty description="La recherche arrive bientôt." />
-    <NText v-if="version" depth="3" class="version">Version {{ version }}</NText>
-  </main>
+  <div class="accueil">
+    <h1 class="h3">Tableau de bord</h1>
+    <p class="text-body-secondary">
+      Les widgets (vues sauvegardées, derniers ajouts, échéances) arrivent à l'étape 2.
+    </p>
+    <RouterLink class="btn btn-primary" :to="{ name: 'documents' }">Parcourir les documents</RouterLink>
+    <p v-if="version" class="version text-body-secondary">Home-GED, version {{ version }}</p>
+  </div>
 </template>
 
 <style scoped>
 .accueil {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 1.5rem;
-  padding: 2rem 1rem;
+  align-items: flex-start;
+  gap: 0.75rem;
 }
 
 .version {
+  margin-top: 2rem;
   font-size: 0.8rem;
 }
 </style>

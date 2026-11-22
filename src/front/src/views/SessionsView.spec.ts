@@ -150,7 +150,7 @@ describe('SessionsView', () => {
     await click(wrapper, other, 'Confirmer')
 
     expect(wrapper.findAll('[data-session]')).toHaveLength(1)
-    expect(wrapper.find('.n-alert').exists()).toBe(false)
+    expect(wrapper.find('.erreur-action').exists()).toBe(false)
   })
 
   it("affiche l'erreur et garde la session si la révocation échoue", async () => {

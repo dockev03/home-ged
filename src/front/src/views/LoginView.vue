@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { NAlert, NButton, NForm, NFormItem, NInput } from 'naive-ui'
 import { nextTick, ref, useTemplateRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ApiError } from '../api/http'
@@ -17,7 +16,8 @@ const code = ref('')
 const mfaRequired = ref(false)
 const submitting = ref(false)
 const error = ref<string | null>(null)
-const codeInput = useTemplateRef<InstanceType<typeof NInput>>('codeInput')
+const codeInput = useTemplateRef<HTMLInputElement>('codeInput')
+const showPassword = ref(false)
 
 // Un autre compte ne partage pas le 2FA du précédent.
 watch(username, () => {
@@ -71,44 +71,67 @@ async function submit() {
 <template>
   <main class="connexion">
     <h1>Home-GED</h1>
-    <p class="aide">Connectez-vous avec votre compte Paperless.</p>
+    <p class="aide text-body-secondary">Connectez-vous avec votre compte Paperless.</p>
 
-    <NForm class="formulaire" :show-require-mark="false" @submit.prevent="submit">
-      <NFormItem label="Identifiant" path="username">
-        <NInput
-          v-model:value="username"
-          :input-props="{ autocomplete: 'username', autocapitalize: 'none', spellcheck: false, name: 'username' }"
-          size="large"
-          placeholder=""
+    <form class="formulaire" novalidate @submit.prevent="submit">
+      <div class="mb-3">
+        <label class="form-label" for="username">Identifiant</label>
+        <input
+          id="username"
+          v-model="username"
+          name="username"
+          class="form-control form-control-lg"
+          autocomplete="username"
+          autocapitalize="none"
+          spellcheck="false"
           autofocus
         />
-      </NFormItem>
-      <NFormItem label="Mot de passe" path="password">
-        <NInput
-          v-model:value="password"
-          type="password"
-          show-password-on="click"
-          :input-props="{ autocomplete: 'current-password', name: 'password' }"
-          size="large"
-          placeholder=""
-        />
-      </NFormItem>
-      <NFormItem v-if="mfaRequired" label="Code de vérification" path="code">
-        <NInput
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="password">Mot de passe</label>
+        <div class="input-group">
+          <input
+            id="password"
+            v-model="password"
+            name="password"
+            :type="showPassword ? 'text' : 'password'"
+            class="form-control form-control-lg"
+            autocomplete="current-password"
+          />
+          <button
+            type="button"
+            class="btn btn-outline-secondary"
+            :aria-pressed="showPassword"
+            @click="showPassword = !showPassword"
+          >
+            {{ showPassword ? 'Masquer' : 'Afficher' }}
+          </button>
+        </div>
+      </div>
+      <div v-if="mfaRequired" class="mb-3">
+        <label class="form-label" for="code">Code de vérification</label>
+        <input
+          id="code"
           ref="codeInput"
-          v-model:value="code"
-          :input-props="{ autocomplete: 'one-time-code', inputmode: 'numeric', pattern: '[0-9 ]*', name: 'code' }"
-          :maxlength="7"
-          size="large"
+          v-model="code"
+          name="code"
+          class="form-control form-control-lg"
+          autocomplete="one-time-code"
+          inputmode="numeric"
+          pattern="[0-9 ]*"
+          maxlength="7"
           placeholder="123 456"
         />
-      </NFormItem>
-      <NAlert v-if="mfaRequired && !error" type="info" :show-icon="false" class="message">
+      </div>
+      <div v-if="mfaRequired && !error" class="alert alert-info">
         Saisissez le code affiché par votre application d'authentification.
-      </NAlert>
-      <NAlert v-if="error" type="error" :show-icon="false" class="message" role="alert">{{ error }}</NAlert>
-      <NButton attr-type="submit" type="primary" size="large" block :loading="submitting">Se connecter</NButton>
-    </NForm>
+      </div>
+      <div v-if="error" class="alert alert-danger" role="alert">{{ error }}</div>
+      <button type="submit" class="btn btn-primary btn-lg w-100" :disabled="submitting">
+        <span v-if="submitting" class="spinner-border spinner-border-sm me-2" aria-hidden="true" />
+        Se connecter
+      </button>
+    </form>
   </main>
 </template>
 
@@ -126,15 +149,10 @@ h1 {
 
 .aide {
   margin: 0.5rem 0 2rem;
-  opacity: 0.75;
 }
 
 .formulaire {
   width: 100%;
   max-width: 22rem;
-}
-
-.message {
-  margin-bottom: 1rem;
 }
 </style>

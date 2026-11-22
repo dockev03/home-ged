@@ -24,3 +24,14 @@ export const formatDate = (date: string | Date) => absolute.format(new Date(date
 
 /** « 22 novembre 2026 à 09:15 » (info-bulle des dates relatives). */
 export const formatDateTime = (date: string | Date) => absoluteWithTime.format(new Date(date))
+
+const short = new Intl.DateTimeFormat('fr-FR', { dateStyle: 'medium' })
+
+/**
+ * « 22 nov. 2026 ». Une date seule (AAAA-MM-JJ, date du document) est lue en heure locale :
+ * lue en UTC, elle passerait à la veille sur un fuseau à l'ouest de Greenwich.
+ */
+export function formatShortDate(date: string): string {
+  const day = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date)
+  return short.format(day ? new Date(Number(day[1]), Number(day[2]) - 1, Number(day[3])) : new Date(date))
+}
