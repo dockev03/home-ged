@@ -1,19 +1,28 @@
-# CI Home-GED : build, tests, format, puis images Docker publiées sur GHCR.
+# CI Home-GED : build, tests, format, audits de vulnérabilités, build Docker de contrôle.
+# Aucune image publiée ici : la publication sur GHCR est dans release.yml (main et tags).
 name: CI
 
 on:
-  push:
-    branches: [main]
-    tags: ["v*"]
   pull_request:
+    branches: [DEV, main]
+  push:
+    branches: [DEV]
   workflow_dispatch:
+  # Réutilisé par release.yml avant la publication des images.
+  workflow_call:
+    inputs:
+      docker-check:
+        description: Construire les images sans les publier
+        type: string
+        default: "true"
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # Appelé par release.yml (github.workflow vaut alors « Release ») : ne jamais annuler une publication.
+  cancel-in-progress: ${{ github.workflow == 'CI' }}
 
 env:
   DOTNET_NOLOGO: "1"
@@ -97,13 +106,35 @@ jobs:
           PAPERLESS_PASSWORD: ci-uniquement
           HOMEGED_DB: Host=localhost;Database=homeged;Username=homeged;Password=ci-uniquement
 
-  images:
-    name: Images ${{ matrix.image.name }}
-    needs: [back, front, integration]
+  audit:
+    name: Audit des dépendances
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - run: dotnet restore HomeGed.slnx
+      - name: NuGet (paquets vulnérables, transitifs compris)
+        run: |
+          dotnet list HomeGed.slnx package --vulnerable --include-transitive | tee nuget-audit.txt
+          if grep -q "has the following vulnerable packages" nuget-audit.txt; then
+            echo "::error::Paquets NuGet vulnérables détectés"
+            exit 1
+          fi
+      - name: npm (sévérité haute et critique)
+        working-directory: src/front
+        run: npm audit --audit-level=high
+
+  docker:
+    name: Build Docker ${{ matrix.image.name }} (sans publication)
+    # Inutile quand release.yml appelle ce workflow : il construit lui-même les images.
+    # Chaîne et non booléen : hors workflow_call, inputs.docker-check est vide et null == false en expression.
+    if: inputs.docker-check != 'false'
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         image:
@@ -112,32 +143,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: docker/setup-buildx-action@v3
-      - name: Connexion à GHCR
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image.name }}
-          # main → « main » et « sha-xxxxxxx » ; tag v1.2.3 → « 1.2.3 » et « 1.2 ».
-          tags: |
-            type=ref,event=branch
-            type=sha,enable=${{ github.event_name != 'pull_request' }}
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=ref,event=pr
       - uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.image.context }}
           file: ${{ matrix.image.file }}
-          # Sur une pull request : build seul, pour valider le Dockerfile.
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: APP_VERSION=${{ steps.meta.outputs.version }}
+          push: false
           cache-from: type=gha,scope=${{ matrix.image.name }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}
