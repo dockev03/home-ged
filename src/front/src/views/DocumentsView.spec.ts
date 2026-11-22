@@ -35,13 +35,14 @@ function stubBff(count: number, options: { fail?: boolean; results?: unknown[] }
     if (url.pathname === '/api/references/tags') return Response.json(TAGS)
     if (url.pathname === '/api/references/correspondants') return Response.json(CORRESPONDANTS)
     if (url.pathname.startsWith('/api/references/')) return Response.json([])
+    if (url.pathname === '/api/documents/ids') return Response.json([])
     if (url.pathname === '/api/documents') {
       if (options.fail) return Response.json({ title: 'Paperless ne répond pas.' }, { status: 503 })
       const page = Number(url.searchParams.get('page'))
       const first = (page - 1) * 25 + 1
       const results =
         options.results ?? Array.from({ length: Math.max(0, Math.min(25, count - first + 1)) }, (_, i) => doc(first + i))
-      return Response.json({ count, all: [], results })
+      return Response.json({ count, results })
     }
     return new Response(null, { status: 404 })
   })
@@ -104,17 +105,23 @@ describe('DocumentsView', () => {
   })
 
   it('mémorise la liste pour précédent / suivant de la fiche', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) =>
-      String(input).startsWith('/api/documents')
-        ? Response.json({ count: 3, all: [7, 3, 9], results: [doc(7), doc(3), doc(9)] })
-        : Response.json([]),
-    )
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/documents/ids')) return Response.json([7, 3, 9])
+      if (url.startsWith('/api/documents')) return Response.json({ count: 3, results: [doc(7), doc(3), doc(9)] })
+      return Response.json([])
+    })
     vi.stubGlobal('fetch', fetchMock)
 
-    await mountView('/documents?q=edf')
+    await mountView('/documents?q=edf&page=2')
 
     const list = useDocumentListStore()
-    expect(list.query).toEqual({ q: 'edf' })
+    expect(list.query).toEqual({ q: 'edf', page: '2' })
+    const idsCall = fetchMock.mock.calls.map(([input]) => String(input)).find((u) => u.startsWith('/api/documents/ids'))!
+    const idsParams = new URL(idsCall, 'http://localhost').searchParams
+    expect(idsParams.get('title_content')).toBe('edf')
+    expect(idsParams.get('ordering')).toBe('-created')
+    expect(idsParams.has('page')).toBe(false)
     expect(list.neighbours(3)).toEqual({ previous: 7, next: 9, position: { index: 2, total: 3 } })
     expect(list.neighbours(7).previous).toBeNull()
   })

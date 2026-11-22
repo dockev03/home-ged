@@ -10,9 +10,19 @@ export const useDocumentListStore = defineStore('documentList', () => {
   const query = ref<LocationQuery>({})
   const ids = ref<number[]>([])
 
-  function remember(listQuery: LocationQuery, all: number[]) {
+  /** Filtres et page de la liste affichée (retour depuis la fiche). */
+  function rememberQuery(listQuery: LocationQuery) {
     query.value = { ...listQuery }
+  }
+
+  /** Identifiants de tous les résultats des filtres en cours. */
+  function rememberIds(all: number[]) {
     ids.value = all
+  }
+
+  function remember(listQuery: LocationQuery, all: number[]) {
+    rememberQuery(listQuery)
+    rememberIds(all)
   }
 
   const neighbours = computed(() => (id: number) => {
@@ -30,5 +40,5 @@ export const useDocumentListStore = defineStore('documentList', () => {
     ids.value = ids.value.filter((value) => value !== id)
   }
 
-  return { query, ids, remember, neighbours, forget }
+  return { query, ids, remember, rememberQuery, rememberIds, neighbours, forget }
 })

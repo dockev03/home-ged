@@ -42,7 +42,16 @@ public static class DocumentEndpoints
             ["types"] = ("document_types", ["id", "name"]),
             ["chemins"] = ("storage_paths", ["id", "name"]),
             ["champs"] = ("custom_fields", ["id", "name", "data_type", "extra_data"]),
+            // Permissions : jamais l'e-mail, le statut ni les droits des comptes.
+            ["utilisateurs"] = ("users", ["id", "username", "first_name", "last_name"]),
+            ["groupes"] = ("groups", ["id", "name"]),
         }.ToFrozenDictionary(StringComparer.Ordinal);
+
+    /// <summary>Listes où la fiche peut créer un élément à la volée (UI-05).</summary>
+    internal static readonly FrozenSet<string> Creatable = FrozenSet.Create(
+        StringComparer.Ordinal, "tags", "correspondants", "types", "chemins");
+
+    public const int MaxVersionLabelLength = 64;
 
     /// <summary>Algorithme de correspondance « Auto » de Paperless, par défaut à la création (B7, B8).</summary>
     internal const int MatchAuto = 6;
@@ -55,6 +64,7 @@ public static class DocumentEndpoints
     public static RouteGroupBuilder MapDocuments(this RouteGroupBuilder api)
     {
         api.MapGet("/documents", ListAsync);
+        api.MapGet("/documents/ids", IdsAsync);
         api.MapGet("/documents/{id:int}", GetAsync);
         api.MapPatch("/documents/{id:int}", UpdateAsync);
         api.MapDelete("/documents/{id:int}", DeleteAsync);
@@ -65,6 +75,13 @@ public static class DocumentEndpoints
         api.MapGet("/documents/{id:int}/notes", NotesAsync);
         api.MapPost("/documents/{id:int}/notes", AddNoteAsync);
         api.MapDelete("/documents/{id:int}/notes/{noteId:int}", DeleteNoteAsync);
+        api.MapGet("/documents/{id:int}/history", HistoryAsync);
+        api.MapGet("/documents/{id:int}/permissions", PermissionsAsync);
+        api.MapPatch("/documents/{id:int}/permissions", UpdatePermissionsAsync);
+        api.MapPost("/documents/{id:int}/versions", UploadVersionAsync);
+        api.MapPatch("/documents/{id:int}/versions/{versionId:int}", RenameVersionAsync);
+        api.MapDelete("/documents/{id:int}/versions/{versionId:int}", DeleteVersionAsync);
+        api.MapGet("/taches/{taskId:guid}", TaskAsync);
         api.MapGet("/references/{kind}", ReferencesAsync);
         api.MapPost("/references/{kind}", CreateReferenceAsync);
         return api;
@@ -73,17 +90,50 @@ public static class DocumentEndpoints
     private static string Path(int id, string suffix = "") =>
         string.Create(CultureInfo.InvariantCulture, $"api/documents/{id}/{suffix}");
 
-    private static async Task<IResult> ListAsync(HttpContext context, PaperlessRelay relay, CancellationToken cancellationToken)
+    /// <summary>Plafond des identifiants renvoyés pour précédent / suivant (celui de l'interface Paperless).</summary>
+    public const int MaxIds = 100_000;
+
+    /// <summary>Filtres et tri de la liste, en liste blanche ; page et taille sont fixées par l'appelant.</summary>
+    private static List<KeyValuePair<string, string?>> ListQuery(HttpContext context, bool withPage)
     {
         var query = new List<KeyValuePair<string, string?>>();
         foreach (var (key, values) in context.Request.Query)
         {
-            if (ListParameters.Contains(key))
+            if (ListParameters.Contains(key) && (withPage || key != "page"))
             {
                 query.AddRange(values.Select(v => new KeyValuePair<string, string?>(key, v)));
             }
         }
 
+        return query;
+    }
+
+    /// <summary>
+    /// Identifiants de tous les documents filtrés, dans l'ordre de la liste (précédent / suivant de la
+    /// fiche). L'API v10 de Paperless ne les joint plus aux pages : requête dédiée, champ id seul.
+    /// </summary>
+    private static async Task<IResult> IdsAsync(HttpContext context, PaperlessRelay relay, CancellationToken cancellationToken)
+    {
+        var query = ListQuery(context, withPage: false);
+        query.Add(new("page_size", MaxIds.ToString(CultureInfo.InvariantCulture)));
+        query.Add(new("fields", "id"));
+        return (await relay.SendAsync(
+            context, HttpMethod.Get, "api/documents/" + QueryString.Create(query).ToUriComponent(), null,
+            async (response, ct) =>
+            {
+                var page = await response.Content.ReadFromJsonAsync<JsonObject>(ct);
+                var ids = (page?["results"] as JsonArray ?? [])
+                    .Select(d => d?["id"] is JsonValue v && v.TryGetValue<int>(out var id) ? id : 0)
+                    .Where(id => id > 0);
+                return TypedResults.Json(ids);
+            },
+            cancellationToken,
+            isFilter: true))!;
+    }
+
+    private static async Task<IResult> ListAsync(HttpContext context, PaperlessRelay relay, CancellationToken cancellationToken)
+    {
+        var query = ListQuery(context, withPage: true);
         query.Add(new("page_size", PageSize(context.Request.Query["page_size"]).ToString(CultureInfo.InvariantCulture)));
         // Extrait du contenu seulement : la liste n'affiche pas le texte OCR complet.
         query.Add(new("truncate_content", "true"));
@@ -133,14 +183,30 @@ public static class DocumentEndpoints
     /// un cadre, et seulement depuis ses propres pages.
     /// </summary>
     private static Task<IResult> PreviewAsync(int id, HttpContext context, PaperlessRelay relay, CancellationToken cancellationToken) =>
-        StreamAsync(context, relay, Path(id, "preview/") + OriginalQuery(context), "private, no-cache", framable: true, cancellationToken);
+        StreamAsync(context, relay, Path(id, "preview/") + FileQuery(context), "private, no-cache", framable: true, cancellationToken);
 
     private static Task<IResult> DownloadAsync(int id, HttpContext context, PaperlessRelay relay, CancellationToken cancellationToken) =>
-        StreamAsync(context, relay, Path(id, "download/") + OriginalQuery(context), "private, no-cache", framable: false, cancellationToken);
+        StreamAsync(context, relay, Path(id, "download/") + FileQuery(context), "private, no-cache", framable: false, cancellationToken);
 
-    /// <summary>Fichier original plutôt que la version archivée (PDF/A) produite par l'OCR.</summary>
-    private static string OriginalQuery(HttpContext context) =>
-        context.Request.Query["original"] == "true" ? "?original=true" : "";
+    /// <summary>
+    /// Fichier demandé : original plutôt que l'archive PDF/A produite par l'OCR, et version précise
+    /// du document (versions Paperless 3) ; seuls ces deux paramètres, validés, sont transmis.
+    /// </summary>
+    internal static string FileQuery(HttpContext context)
+    {
+        var query = new List<KeyValuePair<string, string?>>();
+        if (context.Request.Query["original"] == "true")
+        {
+            query.Add(new("original", "true"));
+        }
+
+        if (int.TryParse(context.Request.Query["version"], NumberStyles.None, CultureInfo.InvariantCulture, out var version) && version > 0)
+        {
+            query.Add(new("version", version.ToString(CultureInfo.InvariantCulture)));
+        }
+
+        return QueryString.Create(query).ToUriComponent();
+    }
 
     private static async Task<IResult> StreamAsync(
         HttpContext context, PaperlessRelay relay, string uri, string cacheControl, bool framable, CancellationToken cancellationToken) =>
@@ -211,6 +277,167 @@ public static class DocumentEndpoints
             Path(id, "notes/") + string.Create(CultureInfo.InvariantCulture, $"?id={noteId}"), null,
             PaperlessRelay.JsonBody, cancellationToken))!;
 
+    /// <summary>
+    /// Historique (journal d'audit) : Paperless le réserve aux comptes qui ont le droit de voir le
+    /// journal, pour leurs documents ou ceux sans propriétaire.
+    /// </summary>
+    private static async Task<IResult> HistoryAsync(int id, HttpContext context, PaperlessRelay relay, CancellationToken cancellationToken) =>
+        (await relay.SendAsync(
+            context, HttpMethod.Get, Path(id, "history/"), null, PaperlessRelay.JsonBody, cancellationToken,
+            onError: status => status switch
+            {
+                HttpStatusCode.Forbidden => PaperlessRelay.Problem(
+                    HttpStatusCode.Forbidden,
+                    "L'historique est réservé au propriétaire du document qui a le droit de consulter le journal d'audit, et aux administrateurs.",
+                    "historique_reserve"),
+                HttpStatusCode.BadRequest => PaperlessRelay.Problem(
+                    HttpStatusCode.BadRequest, "Le journal d'audit est désactivé dans Paperless.", "historique_desactive"),
+                _ => null,
+            }))!;
+
+    private static Task<IResult> PermissionsAsync(int id, HttpContext context, PaperlessRelay relay, CancellationToken cancellationToken) =>
+        PermissionsResultAsync(context, relay, HttpMethod.Get, id, null, cancellationToken);
+
+    /// <summary>
+    /// Propriétaire et droits du document. Paperless n'accepte la modification que du propriétaire,
+    /// d'un administrateur, ou pour un document sans propriétaire.
+    /// </summary>
+    private static async Task<IResult> UpdatePermissionsAsync(
+        int id, JsonNode? body, HttpContext context, PaperlessRelay relay, CancellationToken cancellationToken)
+    {
+        var (update, error) = DocumentUpdate.SanitizePermissions(body);
+        return update is null
+            ? PaperlessRelay.Problem(HttpStatusCode.BadRequest, error!, "requete_invalide")
+            : await PermissionsResultAsync(context, relay, HttpMethod.Patch, id, update, cancellationToken);
+    }
+
+    private static async Task<IResult> PermissionsResultAsync(
+        HttpContext context, PaperlessRelay relay, HttpMethod method, int id, JsonObject? body, CancellationToken cancellationToken) =>
+        (await relay.SendAsync(
+            context, method, Path(id) + "?full_perms=true", body,
+            async (response, ct) =>
+            {
+                var document = await response.Content.ReadFromJsonAsync<JsonObject>(ct)
+                    ?? throw new HttpRequestException("Réponse de Paperless vide.");
+                return TypedResults.Json(Project(document, ["owner", "permissions"]));
+            },
+            cancellationToken,
+            onError: status => status == HttpStatusCode.Forbidden && method == HttpMethod.Patch
+                ? PaperlessRelay.Problem(
+                    HttpStatusCode.Forbidden,
+                    "Seul le propriétaire du document (ou un administrateur) peut modifier ses permissions.",
+                    "acces_refuse")
+                : null))!;
+
+    /// <summary>
+    /// Nouvelle version du document : le multipart du navigateur (champ <c>document</c>, libellé
+    /// facultatif <c>version_label</c>) est relayé en flux. Paperless la traite en tâche de fond (OCR).
+    /// </summary>
+    private static async Task<IResult> UploadVersionAsync(
+        int id, HttpContext context, PaperlessRelay relay, CancellationToken cancellationToken)
+    {
+        var request = context.Request;
+        if (!System.Net.Http.Headers.MediaTypeHeaderValue.TryParse(request.ContentType, out var type)
+            || type.MediaType != "multipart/form-data"
+            || !type.Parameters.Any(p => p.Name.Equals("boundary", StringComparison.OrdinalIgnoreCase)))
+        {
+            return PaperlessRelay.Problem(HttpStatusCode.UnsupportedMediaType, "Envoi de fichier attendu.", "requete_invalide");
+        }
+
+        if (request.ContentLength is not { } length || length == 0)
+        {
+            return PaperlessRelay.Problem(HttpStatusCode.LengthRequired, "Taille du fichier inconnue.", "requete_invalide");
+        }
+
+        if (length > HomeGedApp.MaxRequestBodyBytes)
+        {
+            return PaperlessRelay.Problem(HttpStatusCode.RequestEntityTooLarge, "Fichier trop volumineux (200 Mo au plus).", "fichier_trop_gros");
+        }
+
+        using var content = new StreamContent(request.Body);
+        content.Headers.ContentType = type;
+        content.Headers.ContentLength = length;
+        return (await relay.SendAsync(
+            context, HttpMethod.Post, Path(id, "update_version/"), null,
+            async (response, ct) =>
+            {
+                var task = await response.Content.ReadFromJsonAsync<JsonNode>(ct);
+                return task is JsonValue value && value.TryGetValue<string>(out var taskId) && Guid.TryParse(taskId, out var guid)
+                    ? TypedResults.Json(new { tache = guid }, statusCode: StatusCodes.Status202Accepted)
+                    : throw new HttpRequestException("Réponse de Paperless sans tâche.");
+            },
+            cancellationToken,
+            onError: status => status == HttpStatusCode.Forbidden
+                ? PaperlessRelay.Problem(HttpStatusCode.Forbidden, "Vous ne pouvez pas modifier ce document.", "acces_refuse")
+                : null,
+            upload: content))!;
+    }
+
+    public sealed record VersionLabelRequest(string? VersionLabel);
+
+    private static async Task<IResult> RenameVersionAsync(
+        int id, int versionId, VersionLabelRequest body, HttpContext context, PaperlessRelay relay, CancellationToken cancellationToken)
+    {
+        var label = body.VersionLabel?.Trim() ?? "";
+        if (label.Length > MaxVersionLabelLength)
+        {
+            return PaperlessRelay.Problem(HttpStatusCode.BadRequest, "Libellé trop long (64 caractères au plus).", "requete_invalide");
+        }
+
+        return (await relay.SendAsync(
+            context, HttpMethod.Patch, Path(id, string.Create(CultureInfo.InvariantCulture, $"versions/{versionId}/")),
+            new JsonObject { ["version_label"] = label.Length == 0 ? null : label },
+            PaperlessRelay.JsonBody, cancellationToken))!;
+    }
+
+    /// <summary>Supprime une version ; Paperless refuse de supprimer la dernière version restante.</summary>
+    private static async Task<IResult> DeleteVersionAsync(
+        int id, int versionId, HttpContext context, PaperlessRelay relay, CancellationToken cancellationToken) =>
+        (await relay.SendAsync(
+            context, HttpMethod.Delete, Path(id, string.Create(CultureInfo.InvariantCulture, $"versions/{versionId}/")), null,
+            (_, _) => Task.FromResult<IResult?>(TypedResults.NoContent()),
+            cancellationToken))!;
+
+    /// <summary>
+    /// État d'une tâche de traitement Paperless (OCR d'un envoi), limité à ce que l'écran affiche :
+    /// statut (pending, started, success, failure, revoked), message d'échec, document produit.
+    /// </summary>
+    private static async Task<IResult> TaskAsync(Guid taskId, HttpContext context, PaperlessRelay relay, CancellationToken cancellationToken) =>
+        (await relay.SendAsync(
+            context, HttpMethod.Get, string.Create(CultureInfo.InvariantCulture, $"api/tasks/?task_id={taskId:D}"), null,
+            async (response, ct) =>
+            {
+                var page = await response.Content.ReadFromJsonAsync<JsonNode>(ct);
+                var task = (page?["results"] as JsonArray ?? page as JsonArray)?.OfType<JsonObject>()
+                    .FirstOrDefault(t => t["task_id"]?.GetValue<string>() == taskId.ToString("D"));
+                return TypedResults.Json(TaskState(task));
+            },
+            cancellationToken))!;
+
+    internal static JsonObject TaskState(JsonObject? task)
+    {
+        if (task is null)
+        {
+            // Pas encore enregistrée par Paperless : elle attend son tour.
+            return new JsonObject { ["status"] = "pending", ["message"] = null, ["document_id"] = null };
+        }
+
+        var data = task["result_data"] as JsonObject;
+        var message = Text(data?["reason"]) ?? Text(data?["error_message"]);
+        var document = Integer(data?["document_id"])
+            ?? (task["related_document_ids"] as JsonArray)?.Select(Integer).FirstOrDefault(id => id is not null);
+        return new JsonObject
+        {
+            ["status"] = Text(task["status"])?.ToLowerInvariant() ?? "pending",
+            ["message"] = message is { Length: > 500 } ? message[..500] : message,
+            ["document_id"] = document,
+        };
+
+        static string? Text(JsonNode? node) => node is JsonValue v && v.TryGetValue<string>(out var text) ? text : null;
+
+        static int? Integer(JsonNode? node) => node is JsonValue v && v.TryGetValue<int>(out var id) ? id : null;
+    }
+
     private static async Task<IResult> ReferencesAsync(
         string kind, HttpContext context, PaperlessRelay relay, CancellationToken cancellationToken)
     {
@@ -267,7 +494,7 @@ public static class DocumentEndpoints
     private static async Task<IResult> CreateReferenceAsync(
         string kind, CreateReferenceRequest body, HttpContext context, PaperlessRelay relay, CancellationToken cancellationToken)
     {
-        if (!References.TryGetValue(kind, out var reference) || kind == "champs")
+        if (!References.TryGetValue(kind, out var reference) || !Creatable.Contains(kind))
         {
             return PaperlessRelay.Problem(HttpStatusCode.NotFound, "Liste inconnue.", "liste_inconnue");
         }

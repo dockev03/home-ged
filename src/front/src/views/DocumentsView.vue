@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { listDocuments, thumbnailUrl, type DocumentSummary } from '../api/documents'
+import { listDocumentIds, listDocuments, thumbnailUrl, type DocumentSummary } from '../api/documents'
 import { ApiError } from '../api/http'
 import FilterBar from '../components/FilterBar.vue'
 import TagBadge from '../components/TagBadge.vue'
@@ -66,7 +66,7 @@ async function load(target: number, append: boolean) {
     documents.value = append ? [...documents.value, ...result.results] : result.results
     count.value = result.count
     loadedPage.value = target
-    list.remember(route.query, result.all ?? [])
+    list.rememberQuery(route.query)
   } catch (e) {
     if (current !== generation) return
     // Page hors limites (documents supprimés entre-temps) : retour à la première.
@@ -90,6 +90,25 @@ function loadMore() {
 }
 
 watch([() => JSON.stringify(filters.value), page, mobile], reload)
+
+/**
+ * Identifiants de tous les résultats (précédent / suivant de la fiche) : une requête par changement
+ * de filtres, pas par page. Un échec laisse seulement la fiche sans précédent / suivant.
+ */
+let idsGeneration = 0
+async function loadIds() {
+  const current = ++idsGeneration
+  const params = toApiParams(filters.value, { page: 1, pageSize: PAGE_SIZE, userId: auth.user?.id ?? null })
+  params.delete('page')
+  params.delete('page_size')
+  try {
+    const ids = await listDocumentIds(params)
+    if (current === idsGeneration) list.rememberIds(ids)
+  } catch {
+    if (current === idsGeneration) list.rememberIds([])
+  }
+}
+watch(() => JSON.stringify(filters.value), loadIds)
 
 function updateFilters(next: DocumentFilters) {
   // Nouveaux filtres : retour en haut de la première page (le paramètre page disparaît).
@@ -128,6 +147,7 @@ const highlights = (doc: DocumentSummary) =>
 onMounted(() => {
   void references.ensureLoaded()
   reload()
+  void loadIds()
 })
 </script>
 

@@ -124,4 +124,52 @@ public static class DocumentUpdate
 
         return (fields, true);
     }
+
+    /// <summary>
+    /// Permissions du document : propriétaire (null = aucun) et droits lecture / modification
+    /// (<c>set_permissions</c> complet, comme l'interface Paperless l'envoie).
+    /// </summary>
+    public static (JsonObject? Update, string? Error) SanitizePermissions(JsonNode? body)
+    {
+        const string error = "Permissions invalides.";
+        if (body is not JsonObject source || source.Any(p => p.Key is not ("owner" or "set_permissions"))
+            || source["set_permissions"] is not JsonObject permissions
+            || permissions.Any(p => p.Key is not ("view" or "change")))
+        {
+            return (null, error);
+        }
+
+        var update = new JsonObject();
+        if (source.TryGetPropertyValue("owner", out var owner))
+        {
+            var (clean, valid) = NullableInteger(owner, 1, int.MaxValue);
+            if (!valid)
+            {
+                return (null, error);
+            }
+
+            update["owner"] = clean;
+        }
+
+        var set = new JsonObject();
+        foreach (var action in (string[])["view", "change"])
+        {
+            if (permissions[action] is not JsonObject grantees || grantees.Any(p => p.Key is not ("users" or "groups")))
+            {
+                return (null, error);
+            }
+
+            var (users, usersValid) = Ids(grantees["users"] ?? new JsonArray());
+            var (groups, groupsValid) = Ids(grantees["groups"] ?? new JsonArray());
+            if (!usersValid || !groupsValid)
+            {
+                return (null, error);
+            }
+
+            set[action] = new JsonObject { ["users"] = users, ["groups"] = groups };
+        }
+
+        update["set_permissions"] = set;
+        return (update, null);
+    }
 }
