@@ -1,7 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
-import type { ShareLink } from '../api/shares'
+import type { ShareAccess, ShareLink } from '../api/shares'
 import SharesView from './SharesView.vue'
 
 const LINK_A = 'AAAAAAAAAAAAAAAAAAAAAA'
@@ -23,7 +23,7 @@ interface Call {
   path: string
 }
 
-function stubBff(links: ShareLink[], revokeStatus = 204) {
+function stubBff(links: ShareLink[], revokeStatus = 204, journal: ShareAccess[] = []) {
   const calls: Call[] = []
   let current = [...links]
   vi.stubGlobal(
@@ -37,6 +37,7 @@ function stubBff(links: ShareLink[], revokeStatus = 204) {
         current = current.filter((l) => !url.pathname.endsWith(l.id))
         return new Response(null, { status: 204 })
       }
+      if (url.pathname.endsWith('/journal')) return Response.json({ results: journal })
       return Response.json({ results: current })
     }),
   )
@@ -155,5 +156,38 @@ describe('SharesView', () => {
 
     expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/s/${LINK_A}`)
     expect(wrapper.find('[role="status"]').text()).toContain('copié')
+  })
+
+  it('affiche le journal des accès d’un lien', async () => {
+    const calls = stubBff([link(LINK_A)], 204, [
+      { date: '2026-11-22T07:30:00Z', ip: '203.0.113.2', navigateur: 'Firefox 140', succes: true },
+      { date: '2026-11-22T07:00:00Z', ip: null, navigateur: null, succes: false },
+    ])
+    const wrapper = await mountView()
+
+    await button(wrapper, 'Journal', `[data-lien="${LINK_A}"]`).trigger('click')
+    await flushPromises()
+
+    expect(calls).toContainEqual({ method: 'GET', path: `/api/partages/${LINK_A}/journal` })
+    const entries = wrapper.findAll('.modal .entree')
+    expect(entries).toHaveLength(2)
+    expect(entries[0]!.text()).toContain('Ouvert')
+    expect(entries[0]!.text()).toContain('203.0.113.2')
+    expect(entries[0]!.text()).toContain('Firefox 140')
+    expect(entries[1]!.text()).toContain('Refusé')
+    expect(entries[1]!.text()).toContain('IP inconnue')
+
+    await button(wrapper, 'Fermer', '.modal-footer').trigger('click')
+    expect(wrapper.find('.modal').exists()).toBe(false)
+  })
+
+  it('indique un journal vide', async () => {
+    stubBff([link(LINK_A)])
+    const wrapper = await mountView()
+
+    await button(wrapper, 'Journal', `[data-lien="${LINK_A}"]`).trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.modal').text()).toContain('Personne n\'a encore essayé d\'ouvrir ce lien.')
   })
 })

@@ -11,7 +11,7 @@ namespace HomeGed.Api.Shares;
 
 /// <summary>
 /// Liens de partage protégés, côté propriétaire (SHARE-01, 02, 04) : création, liste, révocation.
-/// La page publique qui les ouvre fait l'objet de l'étape suivante.
+/// Journal d'accès de chaque lien (SHARE-05). La page publique est dans <see cref="PublicShareEndpoints"/>.
 /// </summary>
 public static class ShareEndpoints
 {
@@ -33,6 +33,13 @@ public static class ShareEndpoints
 
     public sealed record ShareList(IReadOnlyList<ShareLinkDto> Results);
 
+    /// <summary>Nombre maximal d'entrées du journal renvoyées (les plus récentes).</summary>
+    public const int MaxLogEntries = 200;
+
+    public sealed record AccessLogEntry(DateTimeOffset Date, string? Ip, string? Navigateur, bool Succes);
+
+    public sealed record AccessLogList(IReadOnlyList<AccessLogEntry> Results);
+
     public static RouteGroupBuilder MapShares(this RouteGroupBuilder api)
     {
         api.MapGet("/partages/reglages", (IOptions<ShareOptions> options) =>
@@ -40,6 +47,7 @@ public static class ShareEndpoints
         api.MapGet("/partages", ListAsync);
         api.MapPost("/partages", CreateAsync);
         api.MapDelete("/partages/{id}", RevokeAsync);
+        api.MapGet("/partages/{id}/journal", AccessLogAsync);
         return api;
     }
 
@@ -168,6 +176,19 @@ public static class ShareEndpoints
         ShareLinkIds.IsValid(id) && await store.RevokeAsync(id, UserId(context), time.GetUtcNow(), cancellationToken)
             ? TypedResults.NoContent()
             : PaperlessRelay.Problem(HttpStatusCode.NotFound, "Lien introuvable.", "introuvable");
+
+    /// <summary>Journal d'accès d'un lien, visible de son seul propriétaire.</summary>
+    private static async Task<IResult> AccessLogAsync(
+        string id, HttpContext context, IShareLinkStore store, CancellationToken cancellationToken)
+    {
+        context.Response.Headers.CacheControl = "no-store";
+        var entries = ShareLinkIds.IsValid(id)
+            ? await store.ListAccessLogAsync(id, UserId(context), MaxLogEntries, cancellationToken)
+            : null;
+        return entries is null
+            ? PaperlessRelay.Problem(HttpStatusCode.NotFound, "Lien introuvable.", "introuvable")
+            : TypedResults.Ok(new AccessLogList([.. entries.Select(e => new AccessLogEntry(e.Timestamp, e.Ip, e.UserAgent, e.Success))]));
+    }
 
     private static ShareLinkDto ToDto(ShareLink link, string? title) => new(
         link.Id, link.DocumentId, title, link.CreatedAt, link.ExpiresAt, link.MaxDownloads, link.DownloadCount);

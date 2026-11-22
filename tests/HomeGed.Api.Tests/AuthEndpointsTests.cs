@@ -55,6 +55,7 @@ public sealed class AuthAppFixture : IAsyncLifetime
                 "--Paperless:BaseUrl=http://paperless:8000",
                 "--Database:ConnectionString=Host=127.0.0.1;Port=9",
                 "--Database:MigrateOnStartup=false",
+                "--Share:ServiceToken=tok-service",
             ],
             b =>
             {

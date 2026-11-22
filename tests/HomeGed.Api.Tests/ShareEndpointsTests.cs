@@ -22,9 +22,24 @@ internal static class FakePaperlessShares
         var token = request.Headers.Authorization?.Parameter;
         if (path is "/api/documents/40/" or "/api/documents/41/")
         {
-            return path == "/api/documents/40/" && token == "tok-alice"
-                ? FakePaperless.Json(HttpStatusCode.OK, """{"id":40}""")
+            return path == "/api/documents/40/" && token is "tok-alice" or "tok-service"
+                ? FakePaperless.Json(HttpStatusCode.OK, """{"id":40,"title":"Bail"}""")
                 : FakePaperless.Json(HttpStatusCode.NotFound, """{"detail":"No Document matches the given query."}""");
+        }
+
+        // Fichiers lus par le compte de service pour la page publique.
+        if (path is "/api/documents/40/preview/" or "/api/documents/40/download/" && token == "tok-service")
+        {
+            var file = new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent("%PDF-1.7 bail"u8.ToArray()) };
+            file.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/pdf");
+            file.Content.Headers.TryAddWithoutValidation(
+                "Content-Disposition", path.EndsWith("download/", StringComparison.Ordinal) ? "attachment; filename=\"bail.pdf\"" : "inline; filename=\"bail.pdf\"");
+            return file;
+        }
+
+        if (path.StartsWith("/api/documents/41/", StringComparison.Ordinal))
+        {
+            return FakePaperless.Json(HttpStatusCode.NotFound, """{"detail":"No Document matches the given query."}""");
         }
 
         if (path == "/api/documents/" && query.ContainsKey("id__in"))
