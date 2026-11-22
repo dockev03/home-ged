@@ -23,6 +23,7 @@ async function mountLayout(path = '/') {
           { path: 'gerer/:type', name: 'gerer', component: page },
           { path: 'corbeille', name: 'corbeille', component: page },
           { path: 'liens', name: 'liens', component: page },
+          { path: 'scanner', name: 'scanner', component: page },
         ],
       },
     ],
@@ -44,15 +45,19 @@ describe('AppLayout', () => {
     useAuthStore().user = { id: 1, username: 'alice' }
   })
 
-  it('affiche le menu, la page et les entrées à venir désactivées', async () => {
+  it('affiche le menu et la page', async () => {
     const { wrapper } = await mountLayout('/documents')
 
     const active = wrapper.find('#menu-principal .nav-link.active')
     expect(active.text()).toBe('Documents')
     expect(wrapper.find('main').text()).toBe('page')
-    const scanner = wrapper.findAll('.nav-link.disabled').find((l) => l.text().startsWith('Scanner'))!
-    expect(scanner.attributes('aria-disabled')).toBe('true')
-    expect(scanner.text()).toContain('bientôt')
+    expect(wrapper.findAll('.nav-link.disabled')).toHaveLength(0)
+  })
+
+  it('mène au scanner', async () => {
+    const { wrapper } = await mountLayout('/scanner')
+
+    expect(wrapper.find('#menu-principal .nav-link.active').text()).toBe('Scanner')
   })
 
   it('mène à la corbeille', async () => {

@@ -21,7 +21,7 @@ const router = useRouter()
 
 interface MenuItem {
   label: string
-  to?: string
+  to: string
   params?: Record<string, string>
   query?: LocationQueryRaw
   /** Vue sauvegardée ouverte par l'entrée (UI-08). */
@@ -83,7 +83,7 @@ const sections = computed<{ title?: string; items: MenuItem[]; open?: boolean }[
   },
   {
     title: 'Home-GED',
-    items: [{ label: 'Scanner' }, { label: 'Mes liens', to: 'liens' }],
+    items: [{ label: 'Scanner', to: 'scanner' }, { label: 'Mes liens', to: 'liens' }],
   },
 ])
 
@@ -241,7 +241,6 @@ onBeforeUnmount(() => document.body.classList.remove('overflow-hidden'))
           <ul v-else class="nav nav-pills flex-column">
             <li v-for="item in section.items" :key="item.viewId ?? item.label" class="nav-item">
               <RouterLink
-                v-if="item.to"
                 class="nav-link"
                 :active-class="linkClasses(item)['active-class']"
                 :exact-active-class="linkClasses(item)['exact-active-class']"
@@ -250,9 +249,6 @@ onBeforeUnmount(() => document.body.classList.remove('overflow-hidden'))
               >
                 {{ item.label }}
               </RouterLink>
-              <span v-else class="nav-link disabled" aria-disabled="true">
-                {{ item.label }} <span class="badge text-bg-secondary fw-normal">bientôt</span>
-              </span>
             </li>
           </ul>
         </template>
