@@ -1,10 +1,18 @@
 <script setup lang="ts">
 import { darkTheme, dateFrFR, frFR, NConfigProvider, NGlobalStyle, NMessageProvider, useOsTheme } from 'naive-ui'
-import { computed } from 'vue'
+import { computed, watchEffect } from 'vue'
+import { applyBrowserTheme } from './format/theme'
+import { usePreferencesStore } from './stores/preferences'
 
-// Le thème suit le système. Le choix mémorisé (PWA-03) arrive au sous-lot 1.4.
+// Thème choisi sur cet appareil (PWA-03) ; par défaut, celui du système.
+const preferences = usePreferencesStore()
 const osTheme = useOsTheme()
-const theme = computed(() => (osTheme.value === 'dark' ? darkTheme : null))
+const dark = computed(() =>
+  preferences.theme === 'systeme' ? osTheme.value === 'dark' : preferences.theme === 'sombre',
+)
+const theme = computed(() => (dark.value ? darkTheme : null))
+
+watchEffect(() => applyBrowserTheme(preferences.theme))
 </script>
 
 <template>

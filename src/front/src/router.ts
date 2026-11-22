@@ -10,6 +10,7 @@ declare module 'vue-router' {
 
 export const routes = [
   { path: '/', name: 'accueil', component: () => import('./views/HomeView.vue') },
+  { path: '/sessions', name: 'sessions', component: () => import('./views/SessionsView.vue') },
   {
     path: '/connexion',
     name: 'connexion',
