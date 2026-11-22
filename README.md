@@ -52,3 +52,16 @@ dotnet build HomeGed.slnx && dotnet test tests/HomeGed.Api.Tests && dotnet forma
 ```bash
 cd src/front && npm run lint && npm test && npm run build
 ```
+
+## Workflow Git
+
+```
+feature/xxx ─┐
+fix/xxx ─────┼─► PR ─► dev ─► PR ─► main ─► images GHCR
+docs/xxx ────┘
+```
+
+- Les branches de travail partent de `dev` et y reviennent par pull request.
+- **CI** (`.github/workflows/ci.yml`), sur les PR vers `dev` et `main` et à chaque push sur `dev` : build, format, tests unitaires et d'intégration, audit des dépendances (NuGet et npm), build Docker de contrôle. **Aucune image publiée.**
+- **Release** (`.github/workflows/release.yml`), sur `main` et sur les tags `v*` : rejoue la CI puis publie les images sur GHCR (`main`, `sha-xxxxxxx`, `1.2.3`, `1.2`).
+- Dependabot ouvre ses PR vers `dev`.

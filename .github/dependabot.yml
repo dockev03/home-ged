@@ -3,18 +3,21 @@ version: 2
 updates:
   - package-ecosystem: nuget
     directory: /
+    target-branch: dev
     schedule: { interval: weekly, day: monday }
     groups:
       nuget: { patterns: ["*"] }
 
   - package-ecosystem: npm
     directory: /src/front
+    target-branch: dev
     schedule: { interval: weekly, day: monday }
     groups:
       npm: { patterns: ["*"] }
 
   - package-ecosystem: github-actions
     directory: /
+    target-branch: dev
     schedule: { interval: weekly, day: monday }
     groups:
       actions: { patterns: ["*"] }
@@ -23,4 +26,5 @@ updates:
   # (montée de version volontaire après lecture du changelog, §3.4).
   - package-ecosystem: docker
     directories: ["/", "/deploy/backup"]
+    target-branch: dev
     schedule: { interval: weekly, day: monday }
