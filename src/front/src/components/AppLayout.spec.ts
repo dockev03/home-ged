@@ -19,6 +19,7 @@ async function mountLayout(path = '/') {
           { path: 'documents', name: 'documents', component: page },
           { path: 'sessions', name: 'sessions', component: page },
           { path: 'documents/:id', name: 'document', component: page },
+          { path: 'gerer/:type', name: 'gerer', component: page },
         ],
       },
     ],
@@ -49,6 +50,17 @@ describe('AppLayout', () => {
     const scanner = wrapper.findAll('.nav-link.disabled').find((l) => l.text().startsWith('Scanner'))!
     expect(scanner.attributes('aria-disabled')).toBe('true')
     expect(scanner.text()).toContain('bientôt')
+  })
+
+  it('mène aux écrans « Gérer » et marque l’écran ouvert', async () => {
+    const { wrapper } = await mountLayout('/gerer/correspondants')
+
+    const links = wrapper.findAll('#menu-principal a.nav-link')
+    const labels = links.map((l) => l.text())
+    expect(labels).toEqual(expect.arrayContaining(['Étiquettes', 'Correspondants', 'Types de documents', 'Chemins de stockage', 'Champs personnalisés']))
+    expect(links.find((l) => l.text() === 'Étiquettes')!.attributes('href')).toBe('/gerer/etiquettes')
+    const active = wrapper.findAll('#menu-principal .nav-link.active')
+    expect(active.map((l) => l.text())).toEqual(['Correspondants'])
   })
 
   it('lance une recherche plein texte vers la liste des documents', async () => {

@@ -47,6 +47,12 @@ export const useReferencesStore = defineStore('references', () => {
     lists.value = { ...lists.value, [kind]: items }
   }
 
+  /** Recharge les listes après une modification dans « Gérer » (UI-07), sans les vider entre-temps. */
+  function reload(): Promise<void> {
+    loading = null
+    return ensureLoaded()
+  }
+
   /** Oublie les listes (déconnexion : un autre utilisateur n'a pas les mêmes droits). */
   function reset() {
     lists.value = { ...EMPTY }
@@ -54,5 +60,5 @@ export const useReferencesStore = defineStore('references', () => {
     loading = null
   }
 
-  return { lists, error, tags, correspondants, types, chemins, ensureLoaded, add, reset }
+  return { lists, error, tags, correspondants, types, chemins, ensureLoaded, add, reload, reset }
 })

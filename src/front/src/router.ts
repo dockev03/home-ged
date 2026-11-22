@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory, type RouteLocationRaw } from 'vue-router'
+import { KIND_SLUGS } from './gestion/kinds'
 import { useAuthStore } from './stores/auth'
 
 declare module 'vue-router' {
@@ -18,6 +19,11 @@ export const routes = [
       { path: 'documents', name: 'documents', component: () => import('./views/DocumentsView.vue') },
       { path: 'documents/:id(\\d+)', name: 'document', component: () => import('./views/DocumentView.vue') },
       { path: 'sessions', name: 'sessions', component: () => import('./views/SessionsView.vue') },
+      {
+        path: `gerer/:type(${KIND_SLUGS.join('|')})`,
+        name: 'gerer',
+        component: () => import('./views/ManageView.vue'),
+      },
     ],
   },
   {
