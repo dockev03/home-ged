@@ -14,6 +14,7 @@ import {
   type PaperlessUser,
 } from '../api/documents'
 import { ApiError } from '../api/http'
+import { useOpenDocumentsStore } from '../stores/openDocuments'
 import { useReferencesStore } from '../stores/references'
 import BaseDropdown from './BaseDropdown.vue'
 import ConfirmDialog from './ConfirmDialog.vue'
@@ -61,6 +62,7 @@ const REFERENCE_LABELS = {
 } as const
 
 const references = useReferencesStore()
+const openDocuments = useOpenDocumentsStore()
 const dialog = ref<Dialog | null>(null)
 const busy = ref(false)
 const error = ref<string | null>(null)
@@ -208,6 +210,7 @@ async function apply() {
       const bulk = action()
       if (!bulk) return
       const queued = await bulkEdit(documents, bulk)
+      if (bulk.method === 'delete') documents.forEach((id) => openDocuments.close(id))
       const done = queued ? await waitForTask(queued.tache) : true
       const plural = documents.length > 1 ? 's' : ''
       const message = bulk.method === 'delete' ? `${label} placé${plural} dans la corbeille.` : `${label} modifié${plural}.`

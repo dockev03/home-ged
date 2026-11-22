@@ -5,6 +5,7 @@ import { MOBILE_QUERY, useMediaQuery } from '../composables/mediaQuery'
 import { viewQuery } from '../filters/savedViews'
 import { KINDS } from '../gestion/kinds'
 import { useAuthStore } from '../stores/auth'
+import { useOpenDocumentsStore } from '../stores/openDocuments'
 import { useSavedViewsStore } from '../stores/savedViews'
 import { useUploadsStore } from '../stores/uploads'
 import UploadPanel from './UploadPanel.vue'
@@ -31,8 +32,28 @@ const auth = useAuthStore()
 const savedViews = useSavedViewsStore()
 onMounted(() => void savedViews.ensureLoaded())
 
+// Documents ouverts (UI-11) : ceux de l'utilisateur connecté.
+const openDocuments = useOpenDocumentsStore()
+watch(
+  () => auth.user?.id,
+  (id) => id !== undefined && openDocuments.load(id),
+  { immediate: true },
+)
+
+/** Fiche fermée depuis le menu : si c'est celle affichée, retour à la liste. */
+function closeDocument(id: number) {
+  openDocuments.close(id)
+  if (route.name === 'document' && Number(route.params.id) === id) void router.push({ name: 'documents' })
+}
+
+function closeAllDocuments() {
+  const showing = route.name === 'document'
+  openDocuments.closeAll()
+  if (showing) void router.push({ name: 'documents' })
+}
+
 /** Entrées du menu ; celles sans route arrivent aux étapes suivantes. */
-const sections = computed<{ title?: string; items: MenuItem[] }[]>(() => [
+const sections = computed<{ title?: string; items: MenuItem[]; open?: boolean }[]>(() => [
   {
     items: [
       { label: 'Tableau de bord', to: 'accueil' },
@@ -52,10 +73,12 @@ const sections = computed<{ title?: string; items: MenuItem[] }[]>(() => [
         },
       ]
     : []),
+  ...(openDocuments.documents.length ? [{ title: 'Documents ouverts', items: [], open: true }] : []),
   {
     title: 'Gérer',
     items: [
       ...KINDS.map((k) => ({ label: k.title, to: 'gerer', params: { type: k.slug } })),
+      { label: 'Corbeille', to: 'corbeille' },
     ],
   },
   {
@@ -198,7 +221,24 @@ onBeforeUnmount(() => document.body.classList.remove('overflow-hidden'))
       <div class="offcanvas-body flex-column">
         <template v-for="section in sections" :key="section.title ?? 'principal'">
           <h2 v-if="section.title" class="menu-titre">{{ section.title }}</h2>
-          <ul class="nav nav-pills flex-column">
+          <ul v-if="section.open" class="nav nav-pills flex-column documents-ouverts">
+            <li v-for="d in openDocuments.documents" :key="d.id" class="nav-item">
+              <RouterLink
+                class="nav-link"
+                active-class=""
+                exact-active-class="active"
+                :to="{ name: 'document', params: { id: d.id } }"
+                :title="d.title"
+              >
+                {{ d.title }}
+              </RouterLink>
+              <button type="button" class="btn-close fermer" :aria-label="`Fermer ${d.title}`" @click="closeDocument(d.id)" />
+            </li>
+            <li class="nav-item">
+              <button type="button" class="nav-link tout-fermer" @click="closeAllDocuments">Tout fermer</button>
+            </li>
+          </ul>
+          <ul v-else class="nav nav-pills flex-column">
             <li v-for="item in section.items" :key="item.viewId ?? item.label" class="nav-item">
               <RouterLink
                 v-if="item.to"
@@ -290,6 +330,31 @@ onBeforeUnmount(() => document.body.classList.remove('overflow-hidden'))
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--bs-secondary-color);
+}
+
+.documents-ouverts .nav-item {
+  display: flex;
+  align-items: center;
+}
+
+.documents-ouverts .nav-link {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fermer {
+  flex: 0 0 auto;
+  margin: 0 0.5rem;
+  font-size: 0.65rem;
+}
+
+.tout-fermer {
+  text-align: start;
+  color: var(--bs-secondary-color);
+  font-size: 0.875rem;
 }
 
 .contenu {

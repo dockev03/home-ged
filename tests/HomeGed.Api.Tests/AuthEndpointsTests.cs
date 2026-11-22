@@ -135,7 +135,8 @@ internal static class FakePaperless
             };
         }
 
-        return FakePaperlessViews.Respond(request, body)
+        return FakePaperlessTrash.Respond(request, body)
+            ?? FakePaperlessViews.Respond(request, body)
             ?? FakePaperlessManage.Respond(request, body)
             ?? FakePaperlessDocuments.Respond(request, body)
             ?? new HttpResponseMessage(HttpStatusCode.NotFound);
