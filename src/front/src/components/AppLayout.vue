@@ -83,7 +83,7 @@ const sections = computed<{ title?: string; items: MenuItem[]; open?: boolean }[
   },
   {
     title: 'Home-GED',
-    items: [{ label: 'Scanner' }, { label: 'Mes liens' }],
+    items: [{ label: 'Scanner' }, { label: 'Mes liens', to: 'liens' }],
   },
 ])
 

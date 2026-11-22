@@ -22,6 +22,101 @@ namespace HomeGed.Api.Data.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("HomeGed.Api.Data.ShareAccessLog", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("Ip")
+                        .HasMaxLength(45)
+                        .HasColumnType("character varying(45)")
+                        .HasColumnName("ip");
+
+                    b.Property<string>("ShareLinkId")
+                        .IsRequired()
+                        .HasMaxLength(22)
+                        .HasColumnType("character varying(22)")
+                        .HasColumnName("share_link_id");
+
+                    b.Property<bool>("Success")
+                        .HasColumnType("boolean")
+                        .HasColumnName("success");
+
+                    b.Property<DateTimeOffset>("Timestamp")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("timestamp");
+
+                    b.Property<string>("UserAgent")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("user_agent");
+
+                    b.HasKey("Id")
+                        .HasName("pk_share_access_log");
+
+                    b.HasIndex("ShareLinkId", "Timestamp")
+                        .HasDatabaseName("ix_share_access_log_share_link_id_timestamp");
+
+                    b.ToTable("share_access_log", (string)null);
+                });
+
+            modelBuilder.Entity("HomeGed.Api.Data.ShareLink", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(22)
+                        .HasColumnType("character varying(22)")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<int>("DocumentId")
+                        .HasColumnType("integer")
+                        .HasColumnName("document_id");
+
+                    b.Property<int>("DownloadCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("download_count");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at");
+
+                    b.Property<int?>("MaxDownloads")
+                        .HasColumnType("integer")
+                        .HasColumnName("max_downloads");
+
+                    b.Property<int>("OwnerId")
+                        .HasColumnType("integer")
+                        .HasColumnName("owner_id");
+
+                    b.Property<string>("PasswordHash")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("password_hash");
+
+                    b.Property<DateTimeOffset?>("RevokedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("revoked_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_share_links");
+
+                    b.HasIndex("ExpiresAt")
+                        .HasDatabaseName("ix_share_links_expires_at");
+
+                    b.HasIndex("OwnerId")
+                        .HasDatabaseName("ix_share_links_owner_id");
+
+                    b.ToTable("share_links", (string)null);
+                });
+
             modelBuilder.Entity("HomeGed.Api.Data.UserSession", b =>
                 {
                     b.Property<Guid>("Id")
@@ -113,6 +208,21 @@ namespace HomeGed.Api.Data.Migrations
                         .HasName("pk_data_protection_keys");
 
                     b.ToTable("data_protection_keys", (string)null);
+                });
+
+            modelBuilder.Entity("HomeGed.Api.Data.ShareAccessLog", b =>
+                {
+                    b.HasOne("HomeGed.Api.Data.ShareLink", null)
+                        .WithMany("AccessLog")
+                        .HasForeignKey("ShareLinkId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_share_access_log_share_links_share_link_id");
+                });
+
+            modelBuilder.Entity("HomeGed.Api.Data.ShareLink", b =>
+                {
+                    b.Navigation("AccessLog");
                 });
 #pragma warning restore 612, 618
         }

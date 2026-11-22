@@ -12,6 +12,10 @@ public sealed class HomeGedDbContext(DbContextOptions<HomeGedDbContext> options)
 {
     public DbSet<UserSession> Sessions => Set<UserSession>();
 
+    public DbSet<ShareLink> ShareLinks => Set<ShareLink>();
+
+    public DbSet<ShareAccessLog> ShareAccessLog => Set<ShareAccessLog>();
+
     /// <summary>Clés Data Protection : le conteneur est en lecture seule et les sessions survivent aux redéploiements.</summary>
     public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
 
@@ -28,6 +32,27 @@ public sealed class HomeGedDbContext(DbContextOptions<HomeGedDbContext> options)
             e.Property(s => s.Username).HasMaxLength(150);
             e.Property(s => s.Ip).HasMaxLength(45);
             e.Property(s => s.UserAgent).HasMaxLength(512);
+        });
+
+        modelBuilder.Entity<ShareLink>(e =>
+        {
+            e.ToTable("share_links");
+            e.HasKey(l => l.Id);
+            e.Property(l => l.Id).HasMaxLength(22);
+            e.Property(l => l.PasswordHash).HasMaxLength(200);
+            e.HasIndex(l => l.OwnerId);
+            e.HasIndex(l => l.ExpiresAt);
+            e.HasMany(l => l.AccessLog).WithOne().HasForeignKey(a => a.ShareLinkId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ShareAccessLog>(e =>
+        {
+            e.ToTable("share_access_log");
+            e.HasKey(a => a.Id);
+            e.Property(a => a.ShareLinkId).HasMaxLength(22);
+            e.HasIndex(a => new { a.ShareLinkId, a.Timestamp });
+            e.Property(a => a.Ip).HasMaxLength(45);
+            e.Property(a => a.UserAgent).HasMaxLength(512);
         });
 
         modelBuilder.Entity<DataProtectionKey>().ToTable("data_protection_keys");
@@ -48,6 +73,11 @@ public sealed class HomeGedDbContext(DbContextOptions<HomeGedDbContext> options)
             foreach (var index in entity.GetIndexes())
             {
                 index.SetDatabaseName(ToSnakeCase(index.GetDatabaseName() ?? ""));
+            }
+
+            foreach (var foreignKey in entity.GetForeignKeys())
+            {
+                foreignKey.SetConstraintName(ToSnakeCase(foreignKey.GetConstraintName() ?? ""));
             }
         }
     }

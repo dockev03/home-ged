@@ -130,8 +130,19 @@ describe('DocumentView', () => {
     expect(wrapper.find('#etiquettes').exists()).toBe(true)
     expect(wrapper.text()).toContain('Banque')
     expect(wrapper.find('iframe').attributes('src')).toBe('/api/documents/5/preview')
-    expect(button(wrapper, 'Envoyer').attributes('disabled')).toBeDefined()
+    expect(button(wrapper, 'Envoyer').attributes('disabled')).toBeUndefined()
     expect(button(wrapper, 'Enregistrer').attributes('disabled')).toBeDefined()
+  })
+
+  it('« Envoyer » ouvre la création d’un lien de partage protégé', async () => {
+    stubBff()
+    const { wrapper } = await mountView()
+
+    await button(wrapper, 'Envoyer').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('#partage-titre').text()).toBe('Envoyer un lien protégé')
+    expect(wrapper.find('.modal').text()).toContain('Facture 5')
   })
 
   it("sur mobile, propose d'ouvrir l'aperçu au lieu du cadre", async () => {
