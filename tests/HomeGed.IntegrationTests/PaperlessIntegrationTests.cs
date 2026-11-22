@@ -5,18 +5,14 @@ namespace HomeGed.IntegrationTests;
 
 /// <summary>
 /// Tests contre une instance Paperless réelle (§3.4.3), lancée par la CI.
-/// Variable : PAPERLESS_URL (obligatoire).
+/// Variables : voir <see cref="IntegrationEnvironment"/>.
 /// </summary>
 public sealed class PaperlessIntegrationTests
 {
-    private static string PaperlessUrl =>
-        Environment.GetEnvironmentVariable("PAPERLESS_URL")
-        ?? throw new InvalidOperationException("PAPERLESS_URL non défini : ces tests demandent un Paperless réel.");
-
     private static PaperlessClient CreateClient(out HttpClient http, int apiVersion)
     {
         http = new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false, UseCookies = false });
-        PaperlessClient.Configure(http, new PaperlessOptions { BaseUrl = PaperlessUrl, ApiVersion = apiVersion });
+        PaperlessClient.Configure(http, new PaperlessOptions { BaseUrl = IntegrationEnvironment.PaperlessUrl, ApiVersion = apiVersion });
         return new PaperlessClient(http, NullLogger<PaperlessClient>.Instance);
     }
 

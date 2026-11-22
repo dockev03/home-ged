@@ -54,4 +54,4 @@ docker run -d --name pl -p 8000:8000 -e PAPERLESS_BIND_ADDR=0.0.0.0 \
 ```
 
 Ensuite, activer le TOTP (`GET` puis `POST /api/profile/totp/` avec `secret` et `code`) et rejouer les appels du tableau.
-Pièges rencontrés : sans `PAPERLESS_BIND_ADDR=0.0.0.0`, le serveur ne démarre pas sur un hôte sans IPv6 ; l'API doit être appelée avec l'hôte de `PAPERLESS_URL` (`localhost`, pas `127.0.0.1`), sinon `DisallowedHost`.
+Pièges rencontrés : Paperless ignore un corps envoyé en `Transfer-Encoding: chunked` (il répond « This field is required ») : le BFF envoie un corps de longueur connue ; sans `PAPERLESS_BIND_ADDR=0.0.0.0`, le serveur ne démarre pas sur un hôte sans IPv6 ; l'API doit être appelée avec l'hôte de `PAPERLESS_URL` (`localhost`, pas `127.0.0.1`), sinon `DisallowedHost`.

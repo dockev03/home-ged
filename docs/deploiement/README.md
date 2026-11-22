@@ -5,7 +5,7 @@
 | Service | Image | Rôle |
 |---|---|---|
 | `webserver` | `paperless-ngx:3.5.1` | Paperless (interface, API, OCR, classement) |
-| `db` | `postgres:18-alpine` | Base de données |
+| `db` | `postgres:18-alpine` | Bases de données : `paperless` et `homeged` (sessions Home-GED) |
 | `broker` | `valkey:9-alpine` | File de tâches (compatible Redis) |
 | `tika` | `apache/tika:3.3.1.0` | Extraction du texte des fichiers Office et e-mails |
 | `gotenberg` | `gotenberg:8.38` | Conversion Office → PDF |
@@ -51,25 +51,71 @@ Choix de configuration notables :
 
    Le mot de passe demandé est ce token.
 
-5. **Démarrer la stack** :
+5. **Démarrer la base, puis créer la base `homeged`** (une seule fois) :
 
    ```bash
    sudo docker compose pull
    ```
 
    ```bash
+   sudo docker compose up -d db
+   ```
+
+   Puis suis [Créer la base homeged](#créer-la-base-homeged).
+
+6. **Démarrer la stack** :
+
+   ```bash
    sudo docker compose up -d
    ```
 
-6. **Publier Home-GED et Paperless via NPM** : [npm.md](npm.md).
-7. **Configurer Paperless** : [configuration-paperless.md](configuration-paperless.md).
-8. **Lancer la première sauvegarde et tester la restauration** : [sauvegardes.md](sauvegardes.md) §7, puis [restauration.md](restauration.md).
+7. **Publier Home-GED et Paperless via NPM** : [npm.md](npm.md).
+8. **Configurer Paperless** : [configuration-paperless.md](configuration-paperless.md).
+9. **Lancer la première sauvegarde et tester la restauration** : [sauvegardes.md](sauvegardes.md) §7, puis [restauration.md](restauration.md).
+
+### Créer la base homeged
+
+Home-GED a sa propre base dans le même PostgreSQL, avec un rôle `homeged` qui n'a aucun droit sur la base Paperless. Il y stocke ses sessions et les clés de chiffrement des tokens Paperless. Les tables sont créées par Home-GED à son démarrage.
+
+Le script d'initialisation de PostgreSQL ne s'exécute qu'à la création du volume `pgdata`, déjà fait : la base se crée à la main, une seule fois.
+
+1. Créer le rôle. Au mot de passe demandé, colle la valeur de `HOMEGED_DB_PASSWORD` du fichier `.env` :
+
+   ```bash
+   sudo docker compose exec db createuser -U paperless --pwprompt homeged
+   ```
+
+2. Créer la base, propriété du rôle :
+
+   ```bash
+   sudo docker compose exec db createdb -U paperless -O homeged homeged
+   ```
+
+3. Empêcher les autres rôles de s'y connecter, et `homeged` de se connecter à la base Paperless :
+
+   ```bash
+   sudo docker compose exec db psql -U paperless -d paperless \
+     -c "REVOKE CONNECT ON DATABASE homeged FROM PUBLIC" \
+     -c "REVOKE CONNECT ON DATABASE paperless FROM PUBLIC"
+   ```
+
+   Le propriétaire d'une base garde ses droits : `paperless` reste connecté à `paperless`, et `homeged` à `homeged`.
+
+### Connexion à Home-GED
+
+- On se connecte avec ses **identifiants Paperless**. Si le 2FA est activé, le code TOTP est demandé ensuite. Les codes de secours ne sont acceptés que par l'interface Paperless.
+- La session dure **30 jours sans utilisation**, et **90 jours au maximum**. Chacun voit et peut fermer ses sessions ouvertes (`/api/auth/sessions`). La déconnexion ferme la session Home-GED, pas le token Paperless. Pour tout couper, il faut régénérer le token dans Paperless (**Mon profil** > **Token API**).
+- **5 échecs en 15 minutes**, par IP ou par identifiant, bloquent les tentatives pendant 15 minutes. Paperless ajoute sa propre limite (`PAPERLESS_TOKEN_THROTTLE_RATE`, 5 par minute et par IP).
+- Ces valeurs se règlent par variables d'environnement du service `app` : `Auth__IdleTimeoutDays`, `Auth__AbsoluteLifetimeDays`, `Auth__MaxFailedAttempts`, `Auth__LockoutMinutes`.
+- Le token Paperless est chiffré en base (ASP.NET Data Protection), mais les clés de chiffrement sont dans la même base. Cela protège d'une fuite de la seule table `sessions`, pas d'un vol de la base entière ou d'une sauvegarde déchiffrée.
 
 ### Et Portainer ?
 
 Toutes les images sont désormais téléchargeables : la stack est entièrement gérable depuis Portainer. Déclare le registre une fois (**Registries** > **Add registry** > **Custom registry**, URL `ghcr.io`, utilisateur `dockev03`, mot de passe : le token `read:packages`), puis crée la stack depuis le dépôt Git (**Stacks** > **Add stack** > **Repository**, chemin `deploy/docker-compose.yml`) en saisissant les variables de `.env.example`.
 
 ## Mettre à jour Home-GED
+
+> **Première mise à jour avec la base `homeged`** (version qui ajoute la connexion) : ajoute `HOMEGED_DB_PASSWORD` dans `.env` (ou dans les variables de la stack Portainer), puis suis [Créer la base homeged](#créer-la-base-homeged) **avant** de mettre à jour. Sinon Home-GED ne démarre pas, et la sauvegarde échoue sur la base manquante.
 
 ```bash
 sudo docker compose pull app backup && sudo docker compose up -d
