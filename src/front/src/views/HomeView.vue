@@ -3,12 +3,14 @@ import { computed, onMounted, ref } from 'vue'
 import { getAppInfo } from '../api/http'
 import { getDeadlines, getStatistics, type Deadlines, type Statistics } from '../api/savedViews'
 import DocumentsWidget from '../components/DocumentsWidget.vue'
+import OfflineDocuments from '../components/OfflineDocuments.vue'
 import TagBadge from '../components/TagBadge.vue'
 import UploadButton from '../components/UploadButton.vue'
 import { defaultFilters, toQuery } from '../filters/documentFilters'
 import { filtersFromView, viewQuery } from '../filters/savedViews'
 import { formatRelative, formatShortDate } from '../format/dates'
 import { useAuthStore } from '../stores/auth'
+import { useNetworkStore } from '../stores/network'
 import { useReferencesStore } from '../stores/references'
 import { useSavedViewsStore } from '../stores/savedViews'
 
@@ -22,6 +24,9 @@ const auth = useAuthStore()
 const references = useReferencesStore()
 const savedViews = useSavedViewsStore()
 const userId = computed(() => auth.user?.id ?? null)
+const network = useNetworkStore()
+/** Hors ligne : les documents gardés sur l'appareil passent en tête (PWA-09). */
+const offline = computed(() => auth.offline || !network.online)
 
 const version = ref<string | null>(null)
 const statistics = ref<Statistics | null>(null)
@@ -108,6 +113,8 @@ onMounted(async () => {
     <h1 class="h3 mb-0">Tableau de bord</h1>
 
     <div class="widgets">
+      <OfflineDocuments v-if="offline" class="widget" />
+
       <!-- Dépôt de fichiers : le glisser-déposer fonctionne partout ; ce widget le rappelle et ouvre le sélecteur. -->
       <section class="card widget depot" aria-labelledby="widget-depot">
         <div class="card-body d-flex flex-column align-items-start gap-2">

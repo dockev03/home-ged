@@ -5,6 +5,7 @@ import { MOBILE_QUERY, useMediaQuery } from '../composables/mediaQuery'
 import { viewQuery } from '../filters/savedViews'
 import { KINDS } from '../gestion/kinds'
 import { useAuthStore } from '../stores/auth'
+import { useNetworkStore } from '../stores/network'
 import { useOpenDocumentsStore } from '../stores/openDocuments'
 import { useSavedViewsStore } from '../stores/savedViews'
 import { useUploadsStore } from '../stores/uploads'
@@ -14,7 +15,7 @@ import UserMenu from './UserMenu.vue'
 /**
  * Coque de l'application (UI-01) : barre du haut avec recherche globale et menu utilisateur,
  * menu latéral fixe sur PC, en tiroir sur mobile. Dépôt de fichiers par glisser-déposer et suivi
- * des envois (PWA-07).
+ * des envois (PWA-07). Indicateur « Hors ligne » avec le nombre d'envois en attente (PWA-09, PWA-10).
  */
 const route = useRoute()
 const router = useRouter()
@@ -124,6 +125,8 @@ function submitSearch() {
 
 const mobile = useMediaQuery(MOBILE_QUERY)
 const uploads = useUploadsStore()
+const network = useNetworkStore()
+const offline = computed(() => auth.offline || !network.online)
 
 // Glisser-déposer de fichiers n'importe où dans l'application (PC).
 const dragging = ref(false)
@@ -194,6 +197,9 @@ onBeforeUnmount(() => document.body.classList.remove('overflow-hidden'))
           enterkeyhint="search"
         />
       </form>
+      <span v-if="offline" class="badge text-bg-warning etat-reseau" role="status">
+        Hors ligne<template v-if="uploads.waiting"> · {{ uploads.waiting }} envoi{{ uploads.waiting > 1 ? 's' : '' }} en attente</template>
+      </span>
       <UserMenu />
     </div>
   </header>
@@ -280,6 +286,14 @@ onBeforeUnmount(() => document.body.classList.remove('overflow-hidden'))
   min-width: 0;
   max-width: 40rem;
   margin-right: auto;
+}
+
+.etat-reseau {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .bouton-menu {

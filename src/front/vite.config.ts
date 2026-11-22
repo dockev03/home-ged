@@ -40,7 +40,19 @@ export default defineConfig({
         // Navigation hors ligne vers l'application ; jamais pour l'API, les sondes ni les liens publics.
         navigateFallback: '/index.html',
         navigateFallbackDenylist: [/^\/api\//, /^\/health/, /^\/s\//],
-        runtimeCaching: [],
+        // OpenCV gardé après sa première utilisation : le scan fonctionne ensuite hors ligne et les
+        // pages partent dans la file d'envoi (PWA-10). Nom haché : une nouvelle version remplace l'ancienne.
+        runtimeCaching: [
+          {
+            urlPattern: ({ url, sameOrigin }) => sameOrigin && /^\/assets\/opencv-[^/]+\.js$/.test(url.pathname),
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'opencv',
+              expiration: { maxEntries: 1 },
+              cacheableResponse: { statuses: [200] },
+            },
+          },
+        ],
       },
     }),
   ],
