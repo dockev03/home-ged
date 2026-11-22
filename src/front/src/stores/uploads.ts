@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { getTask, MAX_UPLOAD_BYTES, uploadDocument } from '../api/documents'
+import { getTask, MAX_UPLOAD_BYTES, uploadDocument, type UploadMetadata } from '../api/documents'
 import { ApiError } from '../api/http'
 
 /** attente → envoi → traitement (OCR et classement par Paperless) → terminé ; ou échec, annulé. */
@@ -35,8 +35,8 @@ export const useUploadsStore = defineStore('uploads', () => {
   let nextId = 1
   let running = false
   const controllers = new Map<number, AbortController>()
-  /** Fichiers en attente d'envoi, dans l'ordre d'ajout. */
-  const queue = new Map<number, File>()
+  /** Fichiers en attente d'envoi (et leurs métadonnées), dans l'ordre d'ajout. */
+  const queue = new Map<number, { file: File; metadata: UploadMetadata }>()
 
   const active = computed(() => items.value.some((u) => u.status === 'attente' || u.status === 'envoi'))
   const pending = computed(() => items.value.some((u) => ['attente', 'envoi', 'traitement'].includes(u.status)))
@@ -45,7 +45,8 @@ export const useUploadsStore = defineStore('uploads', () => {
     items.value = items.value.map((u) => (u.id === id ? { ...u, ...patch } : u))
   }
 
-  function add(files: Iterable<File>) {
+  /** Ajoute des fichiers à la file ; les métadonnées (SCAN-06) s'appliquent à chacun. */
+  function add(files: Iterable<File>, metadata: UploadMetadata = {}) {
     for (const file of files) {
       const error =
         file.size > MAX_UPLOAD_BYTES ? 'Fichier trop volumineux (200 Mo au plus).' : file.size === 0 ? 'Fichier vide.' : null
@@ -59,7 +60,7 @@ export const useUploadsStore = defineStore('uploads', () => {
         documentId: null,
       }
       items.value = [...items.value, upload]
-      if (!error) queue.set(upload.id, file)
+      if (!error) queue.set(upload.id, { file, metadata })
     }
     void pump()
   }
@@ -70,9 +71,9 @@ export const useUploadsStore = defineStore('uploads', () => {
     running = true
     try {
       for (let next = queue.entries().next(); !next.done; next = queue.entries().next()) {
-        const [id, file] = next.value
+        const [id, { file, metadata }] = next.value
         queue.delete(id)
-        const task = await send(id, file)
+        const task = await send(id, file, metadata)
         if (task) void follow(id, task)
       }
     } finally {
@@ -80,12 +81,12 @@ export const useUploadsStore = defineStore('uploads', () => {
     }
   }
 
-  async function send(id: number, file: File): Promise<string | null> {
+  async function send(id: number, file: File, metadata: UploadMetadata): Promise<string | null> {
     const controller = new AbortController()
     controllers.set(id, controller)
     update(id, { status: 'envoi', progress: 0 })
     try {
-      const task = await uploadDocument(file, (progress) => update(id, { progress }), controller.signal)
+      const task = await uploadDocument(file, (progress) => update(id, { progress }), controller.signal, metadata)
       update(id, { status: 'traitement', progress: 1 })
       return task
     } catch (e) {

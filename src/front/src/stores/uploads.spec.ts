@@ -66,6 +66,33 @@ describe('store uploads', () => {
     vi.unstubAllGlobals()
   })
 
+  it('joint titre, étiquettes et champs personnalisés à l’envoi (SCAN-06)', async () => {
+    const sent = stubXhr()
+    stubTask({ status: 'started' })
+    const uploads = useUploadsStore()
+
+    uploads.add([pdf('scan.pdf')], { title: '  Facture EDF  ', tags: [3, 7], customFields: { 2: 'opt-kevin' } })
+    await flushPromises()
+
+    const form = sent[0]!.form
+    expect(form.get('title')).toBe('Facture EDF')
+    expect(form.getAll('tags')).toEqual(['3', '7'])
+    expect(JSON.parse(form.get('custom_fields') as string)).toEqual({ 2: 'opt-kevin' })
+    uploads.reset()
+  })
+
+  it('n’ajoute aucun champ de métadonnées vide', async () => {
+    const sent = stubXhr()
+    stubTask({ status: 'started' })
+    const uploads = useUploadsStore()
+
+    uploads.add([pdf()], { title: '   ', tags: [], customFields: {} })
+    await flushPromises()
+
+    expect([...sent[0]!.form.keys()]).toEqual(['document'])
+    uploads.reset()
+  })
+
   it('envoie le fichier, suit le traitement Paperless et signale le document créé', async () => {
     const sent = stubXhr()
     const fetchMock = stubTask({ status: 'started' }, { status: 'success', document_id: 42 })
