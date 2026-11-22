@@ -18,6 +18,7 @@ export const routes = [
       { path: '', name: 'accueil', component: () => import('./views/HomeView.vue') },
       { path: 'documents', name: 'documents', component: () => import('./views/DocumentsView.vue') },
       { path: 'documents/:id(\\d+)', name: 'document', component: () => import('./views/DocumentView.vue') },
+      { path: 'corbeille', name: 'corbeille', component: () => import('./views/TrashView.vue') },
       { path: 'sessions', name: 'sessions', component: () => import('./views/SessionsView.vue') },
       {
         path: `gerer/:type(${KIND_SLUGS.join('|')})`,

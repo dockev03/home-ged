@@ -331,3 +331,15 @@ export type ArchiveContent = 'archive' | 'originaux' | 'les_deux'
 
 export const bulkDownload = (documents: number[], contenu: ArchiveContent) =>
   postForFile('/api/documents/telechargement', { documents, contenu })
+
+/** Suggestions de classement de Paperless (UI-12) : identifiants et dates trouvées dans le contenu. */
+export interface DocumentSuggestions {
+  tags: number[]
+  correspondents: number[]
+  document_types: number[]
+  storage_paths: number[]
+  /** Dates (AAAA-MM-JJ). */
+  dates: string[]
+}
+
+export const getSuggestions = (id: number) => getJson<DocumentSuggestions>(`/api/documents/${id}/suggestions`)

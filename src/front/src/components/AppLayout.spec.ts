@@ -3,6 +3,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import { useOpenDocumentsStore } from '../stores/openDocuments'
 import { useUploadsStore } from '../stores/uploads'
 import AppLayout from './AppLayout.vue'
 
@@ -20,6 +21,7 @@ async function mountLayout(path = '/') {
           { path: 'sessions', name: 'sessions', component: page },
           { path: 'documents/:id', name: 'document', component: page },
           { path: 'gerer/:type', name: 'gerer', component: page },
+          { path: 'corbeille', name: 'corbeille', component: page },
         ],
       },
     ],
@@ -50,6 +52,35 @@ describe('AppLayout', () => {
     const scanner = wrapper.findAll('.nav-link.disabled').find((l) => l.text().startsWith('Scanner'))!
     expect(scanner.attributes('aria-disabled')).toBe('true')
     expect(scanner.text()).toContain('bientôt')
+  })
+
+  it('mène à la corbeille', async () => {
+    const { wrapper } = await mountLayout('/corbeille')
+
+    expect(wrapper.find('#menu-principal .nav-link.active').text()).toBe('Corbeille')
+  })
+
+  it('liste les documents ouverts, les ferme un par un ou tous', async () => {
+    sessionStorage.clear()
+    const open = useOpenDocumentsStore()
+    open.load(1)
+    open.open({ id: 4, title: 'Devis' })
+    open.open({ id: 5, title: 'Facture' })
+    const { wrapper, router } = await mountLayout('/documents/5')
+
+    const section = wrapper.find('.documents-ouverts')
+    expect(section.findAll('a').map((a) => a.text())).toEqual(['Facture', 'Devis'])
+    expect(section.find('a.active').text()).toBe('Facture')
+
+    await section.find('button[aria-label="Fermer Devis"]').trigger('click')
+    expect(open.documents.map((d) => d.id)).toEqual([5])
+    expect(router.currentRoute.value.name).toBe('document')
+
+    await wrapper.findAll('.documents-ouverts button').find((b) => b.text() === 'Tout fermer')!.trigger('click')
+    await flushPromises()
+    expect(open.documents).toEqual([])
+    expect(router.currentRoute.value.name).toBe('documents')
+    expect(wrapper.find('.documents-ouverts').exists()).toBe(false)
   })
 
   it('mène aux écrans « Gérer » et marque l’écran ouvert', async () => {

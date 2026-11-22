@@ -80,6 +80,7 @@ public static class DocumentEndpoints
         api.MapPost("/documents/{id:int}/notes", AddNoteAsync);
         api.MapDelete("/documents/{id:int}/notes/{noteId:int}", DeleteNoteAsync);
         api.MapGet("/documents/{id:int}/history", HistoryAsync);
+        api.MapGet("/documents/{id:int}/suggestions", SuggestionsAsync);
         api.MapGet("/documents/{id:int}/permissions", PermissionsAsync);
         api.MapPatch("/documents/{id:int}/permissions", UpdatePermissionsAsync);
         api.MapPost("/documents/{id:int}/versions", UploadVersionAsync);
@@ -350,6 +351,45 @@ public static class DocumentEndpoints
     /// Historique (journal d'audit) : Paperless le réserve aux comptes qui ont le droit de voir le
     /// journal, pour leurs documents ou ceux sans propriétaire.
     /// </summary>
+    /// <summary>Listes de suggestions de Paperless renvoyées par <c>GET /documents/{id}/suggestions</c> (UI-12).</summary>
+    internal static readonly string[] SuggestionLists = ["tags", "correspondents", "document_types", "storage_paths"];
+
+    /// <summary>
+    /// Suggestions de classement calculées par Paperless (algorithmes de correspondance et modèle
+    /// entraîné) : identifiants de tags, correspondants, types et chemins, et dates trouvées dans le
+    /// contenu. Seuls ces champs, validés, sont renvoyés.
+    /// </summary>
+    private static async Task<IResult> SuggestionsAsync(int id, HttpContext context, PaperlessRelay relay, CancellationToken cancellationToken) =>
+        (await relay.SendAsync(
+            context, HttpMethod.Get, Path(id, "suggestions/"), null,
+            async (response, ct) =>
+            {
+                var body = await response.Content.ReadFromJsonAsync<JsonObject>(ct)
+                    ?? throw new HttpRequestException("Réponse de Paperless vide.");
+                var suggestions = new JsonObject();
+                foreach (var list in SuggestionLists)
+                {
+                    suggestions[list] = new JsonArray([.. (body[list] as JsonArray ?? [])
+                        .Select(n => n is JsonValue v && v.TryGetValue<int>(out var i) && i > 0 ? i : 0)
+                        .Where(i => i > 0)
+                        .Distinct()
+                        .Select(i => (JsonNode)i)]);
+                }
+
+                suggestions["dates"] = new JsonArray([.. (body["dates"] as JsonArray ?? [])
+                    .Select(n => n is JsonValue v && v.TryGetValue<string>(out var s) && s.Length >= 10
+                        && DateOnly.TryParseExact(s[..10], "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d)
+                        ? d.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+                        : null)
+                    .OfType<string>()
+                    .Distinct()
+                    .Select(s => (JsonNode)s)]);
+
+                context.Response.Headers.CacheControl = "no-store";
+                return TypedResults.Json(suggestions);
+            },
+            cancellationToken))!;
+
     private static async Task<IResult> HistoryAsync(int id, HttpContext context, PaperlessRelay relay, CancellationToken cancellationToken) =>
         (await relay.SendAsync(
             context, HttpMethod.Get, Path(id, "history/"), null, PaperlessRelay.JsonBody, cancellationToken,
