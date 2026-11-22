@@ -1,6 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useUploadsStore } from '../stores/uploads'
@@ -61,6 +61,33 @@ describe('AppLayout', () => {
     expect(links.find((l) => l.text() === 'Étiquettes')!.attributes('href')).toBe('/gerer/etiquettes')
     const active = wrapper.findAll('#menu-principal .nav-link.active')
     expect(active.map((l) => l.text())).toEqual(['Correspondants'])
+  })
+
+  it('affiche les vues choisies pour le menu et marque la vue ouverte', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) =>
+        String(input) === '/api/vues'
+          ? Response.json({
+              vues: [
+                { id: 3, name: 'Impôts', filter_rules: [{ rule_type: 6, value: '2' }], sort_field: null, sort_reverse: false, owner: 1 },
+                { id: 4, name: 'Cachée', filter_rules: [], sort_field: null, sort_reverse: false, owner: 1 },
+              ],
+              tableau_de_bord: [],
+              menu: [3],
+            })
+          : new Response(null, { status: 404 }),
+      ),
+    )
+    onTestFinished(() => {
+      vi.unstubAllGlobals()
+    })
+    const { wrapper } = await mountLayout('/documents?tags=2&vue=3')
+
+    const view = wrapper.findAll('#menu-principal a.nav-link').find((l) => l.text() === 'Impôts')!
+    expect(view.attributes('href')).toBe('/documents?tags=2&vue=3')
+    expect(wrapper.findAll('#menu-principal .nav-link.active').map((l) => l.text())).toEqual(['Impôts'])
+    expect(wrapper.text()).not.toContain('Cachée')
   })
 
   it('lance une recherche plein texte vers la liste des documents', async () => {

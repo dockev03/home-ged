@@ -124,13 +124,19 @@ internal static class FakePaperless
         {
             return request.Headers.Authorization?.Parameter switch
             {
-                "tok-alice" => Json(HttpStatusCode.OK, """{"user":{"id":1,"username":"alice"}}"""),
+                "tok-alice" => Json(HttpStatusCode.OK, """
+                    {"user":{"id":1,"username":"alice"},"version":"3.5.1",
+                     "settings":{"dark_mode":{"enabled":"true"},"trash_delay":30,"version":"3.5.1","gmail_oauth_url":"https://accounts.example/?state=x",
+                       "saved_views":{"dashboard_views_visible_ids":[2,"5",99],"dashboard_views_sort_order":[5,99,3],
+                         "sidebar_views_visible_ids":[5],"warn_on_unsaved_change":true}}}
+                    """),
                 "tok-bob" => Json(HttpStatusCode.OK, """{"user":{"id":2,"username":"bob"}}"""),
                 _ => new HttpResponseMessage(HttpStatusCode.Unauthorized),
             };
         }
 
-        return FakePaperlessManage.Respond(request, body)
+        return FakePaperlessViews.Respond(request, body)
+            ?? FakePaperlessManage.Respond(request, body)
             ?? FakePaperlessDocuments.Respond(request, body)
             ?? new HttpResponseMessage(HttpStatusCode.NotFound);
     }

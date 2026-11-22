@@ -3,23 +3,30 @@ import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from
 import { useRoute, useRouter } from 'vue-router'
 import { listDocumentIds, listDocuments, thumbnailUrl, type DocumentSummary } from '../api/documents'
 import { ApiError } from '../api/http'
+import type { SavedView } from '../api/savedViews'
+import BaseDropdown from '../components/BaseDropdown.vue'
 import BulkActions from '../components/BulkActions.vue'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
 import FilterBar from '../components/FilterBar.vue'
+import SavedViewDialog from '../components/SavedViewDialog.vue'
 import TagBadge from '../components/TagBadge.vue'
 import UploadButton from '../components/UploadButton.vue'
 import { MOBILE_QUERY, useMediaQuery } from '../composables/mediaQuery'
 import { fromQuery, toApiParams, toQuery, type DocumentFilters } from '../filters/documentFilters'
+import { differsFromView, filtersFromView, viewFromFilters, viewQuery } from '../filters/savedViews'
 import { formatShortDate } from '../format/dates'
 import { parseHighlights } from '../format/highlights'
 import { useAuthStore } from '../stores/auth'
 import { useDocumentListStore } from '../stores/documentList'
 import { usePreferencesStore, type DisplayChoice } from '../stores/preferences'
 import { useReferencesStore } from '../stores/references'
+import { useSavedViewsStore } from '../stores/savedViews'
 import { useUploadsStore } from '../stores/uploads'
 
 /**
  * Liste des documents (UI-02) : vignettes, détails ou tableau ; filtres dans l'URL (UI-03) ;
- * sélection multiple et actions en masse (UI-06).
+ * sélection multiple et actions en masse (UI-06) ; vues sauvegardées (UI-08), la vue ouverte
+ * étant repérée par le paramètre `vue` de l'URL.
  */
 const PAGE_SIZE = 25
 
@@ -169,9 +176,78 @@ function applied(message: string, modified: boolean) {
   void loadIds()
 }
 
+// Vues sauvegardées (UI-08).
+const savedViews = useSavedViewsStore()
+const userId = computed(() => auth.user?.id ?? null)
+const viewId = computed(() => {
+  const value = Number(route.query.vue)
+  return Number.isSafeInteger(value) && value > 0 ? value : null
+})
+const activeView = computed(() => (viewId.value === null ? null : savedViews.byId.get(viewId.value) ?? null))
+const viewModified = computed(() => activeView.value !== null && differsFromView(filters.value, activeView.value, userId.value))
+const unsupportedRules = computed(() =>
+  activeView.value ? filtersFromView(activeView.value, userId.value).unsupported : [],
+)
+const canChangeView = computed(() => activeView.value?.user_can_change !== false)
+
+const viewDialog = ref<'creation' | 'modification' | null>(null)
+const confirmingDelete = ref(false)
+const viewBusy = ref(false)
+const viewError = ref<string | null>(null)
+
+function openView(view: SavedView) {
+  void router.push({ name: 'documents', query: viewQuery(view, userId.value) })
+}
+
+function viewSaved(view: SavedView) {
+  const created = viewDialog.value === 'creation'
+  viewDialog.value = null
+  notice.value = created ? `Vue « ${view.name} » enregistrée.` : `Vue « ${view.name} » modifiée.`
+  if (created) void router.replace({ query: { ...toQuery(filters.value), vue: String(view.id) } })
+}
+
+/** Remplace les critères et le tri de la vue ouverte par les filtres affichés. */
+async function updateView() {
+  const view = activeView.value
+  if (!view) return
+  viewBusy.value = true
+  viewError.value = null
+  try {
+    const definition = viewFromFilters(filters.value, userId.value)
+    await savedViews.update(view.id, {
+      ...definition,
+      // Critères que Home-GED n'affiche pas : conservés tels quels.
+      filter_rules: [...definition.filter_rules, ...unsupportedRules.value],
+    })
+    notice.value = `Vue « ${view.name} » mise à jour.`
+  } catch (e) {
+    viewError.value = errorMessage(e)
+  } finally {
+    viewBusy.value = false
+  }
+}
+
+async function deleteView() {
+  const view = activeView.value
+  if (!view) return
+  viewBusy.value = true
+  viewError.value = null
+  try {
+    await savedViews.remove(view.id)
+    confirmingDelete.value = false
+    notice.value = `Vue « ${view.name} » supprimée.`
+    void router.replace({ query: toQuery(filters.value) })
+  } catch (e) {
+    confirmingDelete.value = false
+    viewError.value = errorMessage(e)
+  } finally {
+    viewBusy.value = false
+  }
+}
+
 function updateFilters(next: DocumentFilters) {
-  // Nouveaux filtres : retour en haut de la première page (le paramètre page disparaît).
-  void router.replace({ query: toQuery(next) })
+  // Nouveaux filtres : retour en haut de la première page (le paramètre page disparaît) ; la vue ouverte reste repérée.
+  void router.replace({ query: { ...toQuery(next), ...(viewId.value ? { vue: String(viewId.value) } : {}) } })
 }
 
 function goToPage(target: number) {
@@ -205,6 +281,7 @@ const highlights = (doc: DocumentSummary) =>
 
 onMounted(() => {
   void references.ensureLoaded()
+  void savedViews.ensureLoaded()
   reload()
   void loadIds()
 })
@@ -213,7 +290,57 @@ onMounted(() => {
 <template>
   <div class="documents">
     <div class="entete">
-      <h1 class="h3 mb-0 me-auto">Documents</h1>
+      <h1 class="h3 mb-0 me-auto titre-liste">
+        {{ activeView?.name ?? 'Documents' }}
+        <span v-if="viewModified" class="badge text-bg-warning fw-normal fs-6">modifiée</span>
+      </h1>
+      <BaseDropdown button-class="btn btn-sm btn-outline-secondary" end aria-label="Vues sauvegardées">
+        <template #toggle>Vues</template>
+        <template #default="{ close }">
+          <template v-if="savedViews.views.length">
+            <h2 class="dropdown-header">Ouvrir une vue</h2>
+            <button
+              v-for="view in savedViews.views"
+              :key="view.id"
+              type="button"
+              class="dropdown-item"
+              :class="{ active: view.id === activeView?.id }"
+              role="menuitem"
+              @click="close(); openView(view)"
+            >
+              {{ view.name }}
+            </button>
+            <hr class="dropdown-divider" />
+          </template>
+          <button type="button" class="dropdown-item" role="menuitem" @click="close(); viewDialog = 'creation'">
+            Enregistrer comme nouvelle vue…
+          </button>
+          <template v-if="activeView">
+            <button
+              v-if="canChangeView"
+              type="button"
+              class="dropdown-item"
+              role="menuitem"
+              :disabled="!viewModified || viewBusy"
+              @click="close(); updateView()"
+            >
+              Mettre à jour « {{ activeView.name }} »
+            </button>
+            <button type="button" class="dropdown-item" role="menuitem" @click="close(); viewDialog = 'modification'">
+              Modifier la vue…
+            </button>
+            <button
+              v-if="canChangeView"
+              type="button"
+              class="dropdown-item text-danger"
+              role="menuitem"
+              @click="close(); confirmingDelete = true"
+            >
+              Supprimer la vue…
+            </button>
+          </template>
+        </template>
+      </BaseDropdown>
       <UploadButton button-class="btn btn-sm btn-primary" />
       <div class="btn-group" role="group" aria-label="Affichage">
         <button
@@ -231,6 +358,17 @@ onMounted(() => {
     </div>
 
     <FilterBar :model-value="filters" @update:model-value="updateFilters" />
+
+    <div v-if="unsupportedRules.length" class="alert alert-warning mb-0" role="status">
+      Cette vue contient {{ unsupportedRules.length }} critère{{ unsupportedRules.length > 1 ? 's' : '' }} que Home-GED
+      ne sait pas encore afficher : {{ unsupportedRules.length > 1 ? 'ils sont ignorés' : 'il est ignoré' }} dans cette liste,
+      mais {{ unsupportedRules.length > 1 ? 'conservés' : 'conservé' }} si vous mettez la vue à jour.
+    </div>
+
+    <div v-if="viewError" class="alert alert-danger alert-dismissible mb-0" role="alert">
+      {{ viewError }}
+      <button type="button" class="btn-close" aria-label="Fermer" @click="viewError = null" />
+    </div>
 
     <BulkActions
       v-if="selected.length && !mobile"
@@ -409,6 +547,29 @@ onMounted(() => {
       @applied="applied"
     />
 
+    <SavedViewDialog
+      :open="viewDialog !== null"
+      :view="viewDialog === 'modification' ? activeView : null"
+      :definition="viewDialog === 'creation' ? viewFromFilters(filters, userId) : undefined"
+      @saved="viewSaved"
+      @cancel="viewDialog = null"
+    />
+
+    <ConfirmDialog
+      :open="confirmingDelete"
+      title="Supprimer la vue"
+      confirm-label="Supprimer"
+      danger
+      :busy="viewBusy"
+      @confirm="deleteView"
+      @cancel="confirmingDelete = false"
+    >
+      <p class="mb-0">
+        Supprimer la vue « {{ activeView?.name }} » ? Elle disparaît aussi de Paperless, pour tous ceux qui y ont accès.
+        Aucun document n'est supprimé.
+      </p>
+    </ConfirmDialog>
+
     <!-- PC : pagination. -->
     <nav v-if="!mobile && pageCount > 1" aria-label="Pagination">
       <ul class="pagination justify-content-center flex-wrap">
@@ -444,6 +605,10 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
+}
+
+.titre-liste {
+  overflow-wrap: anywhere;
 }
 
 .compteur {
