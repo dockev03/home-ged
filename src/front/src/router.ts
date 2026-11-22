@@ -9,8 +9,17 @@ declare module 'vue-router' {
 }
 
 export const routes = [
-  { path: '/', name: 'accueil', component: () => import('./views/HomeView.vue') },
-  { path: '/sessions', name: 'sessions', component: () => import('./views/SessionsView.vue') },
+  {
+    // Écrans connectés : dans la coque (menu latéral, recherche, menu utilisateur).
+    path: '/',
+    component: () => import('./components/AppLayout.vue'),
+    children: [
+      { path: '', name: 'accueil', component: () => import('./views/HomeView.vue') },
+      { path: 'documents', name: 'documents', component: () => import('./views/DocumentsView.vue') },
+      { path: 'documents/:id(\\d+)', name: 'document', component: () => import('./views/DocumentView.vue') },
+      { path: 'sessions', name: 'sessions', component: () => import('./views/SessionsView.vue') },
+    ],
+  },
   {
     path: '/connexion',
     name: 'connexion',

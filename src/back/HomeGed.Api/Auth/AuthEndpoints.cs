@@ -179,7 +179,7 @@ public static partial class AuthEndpoints
     private static Guid SessionId(ClaimsPrincipal user) =>
         Guid.Parse(user.FindFirstValue(SessionAuthenticationHandler.SessionIdClaim)!);
 
-    private static void DeleteCookie(HttpContext context) =>
+    internal static void DeleteCookie(HttpContext context) =>
         context.Response.Cookies.Delete(SessionTokens.CookieName, new CookieOptions
         {
             HttpOnly = true,

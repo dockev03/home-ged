@@ -10,7 +10,7 @@ Surcouche web (PWA mobile-first) au-dessus de Paperless-ngx : recherche, consult
 | Dossier | Contenu |
 |---|---|
 | `src/back/HomeGed.Api` | BFF ASP.NET Core (.NET 10) : API, sessions, client Paperless ; sert le front buildé |
-| `src/front` | PWA Vue 3 + TypeScript + Vite, composants Naive UI |
+| `src/front` | PWA Vue 3 + TypeScript + Vite, styles Bootstrap 5 (CSS seul, composants interactifs en Vue) |
 | `tests/HomeGed.Api.Tests` | Tests unitaires du back |
 | `tests/HomeGed.IntegrationTests` | Tests contre un Paperless et un PostgreSQL réels (`PAPERLESS_URL`, `PAPERLESS_USER`, `PAPERLESS_PASSWORD`, `HOMEGED_DB`) |
 | `deploy` | Stack Docker Compose (Paperless, Home-GED, sauvegardes) |
@@ -52,3 +52,16 @@ dotnet build HomeGed.slnx && dotnet test tests/HomeGed.Api.Tests && dotnet forma
 ```bash
 cd src/front && npm run lint && npm test && npm run build
 ```
+
+## Workflow Git
+
+```
+feature/xxx ─┐
+fix/xxx ─────┼─► PR ─► DEV ─► PR ─► main ─► images GHCR
+docs/xxx ────┘
+```
+
+- Les branches de travail partent de `DEV` et y reviennent par pull request.
+- **CI** (`.github/workflows/ci.yml`), sur les PR vers `DEV` et `main` et à chaque push sur `DEV` : build, format, tests unitaires et d'intégration, audit des dépendances (NuGet et npm), build Docker de contrôle. **Aucune image publiée.**
+- **Release** (`.github/workflows/release.yml`), sur `main` et sur les tags `v*` : rejoue la CI puis publie les images sur GHCR (`main`, `sha-xxxxxxx`, `1.2.3`, `1.2`).
+- Dependabot ouvre ses PR vers `DEV`.

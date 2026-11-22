@@ -3,7 +3,9 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.Options;
 
 namespace HomeGed.Api.Paperless;
 
@@ -21,8 +23,15 @@ public enum PaperlessProbeResult
 /// Client typé de l'API REST Paperless. Seul point de contact avec Paperless :
 /// jamais d'accès à sa base ni à son dossier media.
 /// </summary>
-public sealed partial class PaperlessClient(HttpClient http, ILogger<PaperlessClient> logger)
+public sealed partial class PaperlessClient(
+    HttpClient http, ILogger<PaperlessClient> logger, IOptions<PaperlessOptions>? options = null)
 {
+    /// <summary>Délai d'un appel ordinaire (jusqu'aux en-têtes de la réponse).</summary>
+    private readonly TimeSpan _timeout = TimeSpan.FromSeconds(options?.Value.TimeoutSeconds ?? 30);
+
+    /// <summary>Délai d'un envoi de fichier : il dure autant que le transfert depuis l'appareil.</summary>
+    private readonly TimeSpan _uploadTimeout = TimeSpan.FromMinutes(options?.Value.UploadTimeoutMinutes ?? 30);
+
     /// <summary>Configure l'HttpClient : adresse de base, version d'API figée, délai.</summary>
     public static void Configure(HttpClient http, PaperlessOptions options)
     {
@@ -30,7 +39,8 @@ public sealed partial class PaperlessClient(HttpClient http, ILogger<PaperlessCl
         ArgumentNullException.ThrowIfNull(options);
 
         http.BaseAddress = new Uri(options.BaseUrl.TrimEnd('/') + "/");
-        http.Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds);
+        // Délai géré appel par appel (voir Deadline) : un envoi de fichier dure plus qu'un appel ordinaire.
+        http.Timeout = Timeout.InfiniteTimeSpan;
         http.DefaultRequestHeaders.Accept.Clear();
         var accept = new MediaTypeWithQualityHeaderValue("application/json");
         accept.Parameters.Add(new NameValueHeaderValue(
@@ -45,8 +55,9 @@ public sealed partial class PaperlessClient(HttpClient http, ILogger<PaperlessCl
     /// </summary>
     public async Task<PaperlessProbeResult> ProbeAsync(CancellationToken cancellationToken)
     {
+        using var deadline = Deadline(_timeout, cancellationToken);
         using var response = await http.GetAsync(
-            new Uri("api/documents/?page_size=1", UriKind.Relative), cancellationToken);
+            new Uri("api/documents/?page_size=1", UriKind.Relative), deadline.Token);
         var status = (int)response.StatusCode;
         if (response.StatusCode == HttpStatusCode.NotAcceptable)
         {
@@ -85,11 +96,12 @@ public sealed partial class PaperlessClient(HttpClient http, ILogger<PaperlessCl
             request.Headers.TryAddWithoutValidation("X-Forwarded-For", clientIp);
         }
 
-        using var response = await http.SendAsync(request, cancellationToken);
+        using var deadline = Deadline(_timeout, cancellationToken);
+        using var response = await http.SendAsync(request, deadline.Token);
         switch (response.StatusCode)
         {
             case HttpStatusCode.OK:
-                var body = await response.Content.ReadFromJsonAsync<TokenResponse>(cancellationToken);
+                var body = await response.Content.ReadFromJsonAsync<TokenResponse>(deadline.Token);
                 return string.IsNullOrEmpty(body?.Token)
                     ? throw new HttpRequestException("Réponse de Paperless sans token.")
                     : new TokenResult(TokenOutcome.Success, body.Token);
@@ -98,7 +110,7 @@ public sealed partial class PaperlessClient(HttpClient http, ILogger<PaperlessCl
                 return new TokenResult(TokenOutcome.Throttled, RetryAfter: response.Headers.RetryAfter?.Delta);
 
             case HttpStatusCode.BadRequest:
-                var errors = await ReadErrorsAsync(response, cancellationToken);
+                var errors = await ReadErrorsAsync(response, deadline.Token);
                 if (errors.Contains(MfaRequiredMessage, StringComparer.Ordinal))
                 {
                     return new TokenResult(TokenOutcome.MfaRequired);
@@ -120,7 +132,8 @@ public sealed partial class PaperlessClient(HttpClient http, ILogger<PaperlessCl
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, new Uri("api/ui_settings/", UriKind.Relative));
         request.Headers.Authorization = new AuthenticationHeaderValue("Token", token);
-        using var response = await http.SendAsync(request, cancellationToken);
+        using var deadline = Deadline(_timeout, cancellationToken);
+        using var response = await http.SendAsync(request, deadline.Token);
         if (!response.IsSuccessStatusCode)
         {
             throw new HttpRequestException(
@@ -128,10 +141,57 @@ public sealed partial class PaperlessClient(HttpClient http, ILogger<PaperlessCl
                 null, response.StatusCode);
         }
 
-        var settings = await response.Content.ReadFromJsonAsync<UiSettingsResponse>(cancellationToken);
+        var settings = await response.Content.ReadFromJsonAsync<UiSettingsResponse>(deadline.Token);
         return settings?.User is { Id: > 0, Username.Length: > 0 } user
             ? new PaperlessUser(user.Id, user.Username)
             : throw new HttpRequestException("Réponse de Paperless sans utilisateur.");
+    }
+
+    /// <summary>GET authentifié par le token de l'utilisateur (voir <see cref="SendAsync"/>).</summary>
+    public Task<HttpResponseMessage> GetAsync(string token, string relativeUri, CancellationToken cancellationToken) =>
+        SendAsync(token, HttpMethod.Get, relativeUri, null, cancellationToken);
+
+    /// <summary>
+    /// Requête authentifiée par le token de l'utilisateur : les droits sont appliqués par Paperless.
+    /// La réponse est rendue dès les en-têtes reçus (flux) ; l'appelant la libère.
+    /// </summary>
+    public async Task<HttpResponseMessage> SendAsync(
+        string token, HttpMethod method, string relativeUri, JsonNode? body, CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(method, new Uri(relativeUri, UriKind.Relative));
+        request.Headers.Authorization = new AuthenticationHeaderValue("Token", token);
+        if (body is not null)
+        {
+            // Longueur connue : Paperless ignore un corps envoyé en Transfer-Encoding: chunked.
+            request.Content = new ByteArrayContent(JsonSerializer.SerializeToUtf8Bytes(body))
+            {
+                Headers = { ContentType = new MediaTypeHeaderValue("application/json") },
+            };
+        }
+
+        using var deadline = Deadline(_timeout, cancellationToken);
+        return await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
+    }
+
+    /// <summary>
+    /// Envoi d'un fichier en flux : le corps <paramref name="content"/> (multipart reçu du navigateur)
+    /// est transmis à Paperless au fil de sa réception, sans copie en mémoire ni sur disque.
+    /// </summary>
+    public async Task<HttpResponseMessage> UploadAsync(
+        string token, string relativeUri, HttpContent content, CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(relativeUri, UriKind.Relative)) { Content = content };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Token", token);
+        using var deadline = Deadline(_uploadTimeout, cancellationToken);
+        return await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
+    }
+
+    /// <summary>Annule l'appel au-delà du délai, ou quand l'appelant abandonne.</summary>
+    private static CancellationTokenSource Deadline(TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        var source = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        source.CancelAfter(timeout);
+        return source;
     }
 
     /// <summary>Messages de Paperless 3.5 (sans Accept-Language, ils restent en anglais).</summary>

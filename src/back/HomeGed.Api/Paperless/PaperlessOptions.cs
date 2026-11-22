@@ -18,4 +18,8 @@ public sealed class PaperlessOptions
 
     [Range(1, 600)]
     public int TimeoutSeconds { get; set; } = 30;
+
+    /// <summary>Délai d'un envoi de fichier (nouvelle version, upload) : transfert depuis un mobile compris.</summary>
+    [Range(1, 240)]
+    public int UploadTimeoutMinutes { get; set; } = 30;
 }

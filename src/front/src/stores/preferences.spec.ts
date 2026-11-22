@@ -1,7 +1,7 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
-import { THEME_STORAGE_KEY, usePreferencesStore } from './preferences'
+import { DISPLAY_STORAGE_KEY, THEME_STORAGE_KEY, usePreferencesStore } from './preferences'
 
 describe('store preferences', () => {
   beforeEach(() => {
@@ -49,5 +49,17 @@ describe('store preferences', () => {
     preferences.theme = 'sombre'
     await nextTick()
     expect(preferences.theme).toBe('sombre')
+  })
+
+  it("mémorise l'affichage de la liste, « détails » par défaut", async () => {
+    const preferences = usePreferencesStore()
+    expect(preferences.display).toBe('details')
+
+    preferences.display = 'tableau'
+    await nextTick()
+    expect(localStorage.getItem(DISPLAY_STORAGE_KEY)).toBe('tableau')
+
+    setActivePinia(createPinia())
+    expect(usePreferencesStore().display).toBe('tableau')
   })
 })

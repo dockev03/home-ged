@@ -2,6 +2,7 @@ using System.Net;
 using System.Reflection;
 using HomeGed.Api.Auth;
 using HomeGed.Api.Data;
+using HomeGed.Api.Documents;
 using HomeGed.Api.Hosting;
 using HomeGed.Api.Paperless;
 using Microsoft.AspNetCore.DataProtection;
@@ -73,6 +74,7 @@ public static class HomeGedApp
         builder.Services.AddSingleton<LoginThrottle>();
         builder.Services.AddSingleton<PaperlessTokenProtector>();
         builder.Services.AddScoped<ISessionStore, EfSessionStore>();
+        builder.Services.AddScoped<PaperlessRelay>();
         builder.Services.AddHostedService<SessionCleanupService>();
         builder.Services.AddAuthentication(SessionAuthenticationHandler.SchemeName)
             .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, SessionAuthenticationHandler>(
@@ -119,6 +121,7 @@ public static class HomeGedApp
         var api = app.MapGroup("/api").RequireAuthorization();
         api.MapGet("/info", () => TypedResults.Ok(new AppInfo(AppVersion))).AllowAnonymous();
         api.MapAuth();
+        api.MapDocuments();
         // Toute autre route /api/* : 404 JSON, jamais la page de l'application.
         api.Map("/{**rest}", () => Results.Problem(statusCode: (int)HttpStatusCode.NotFound)).AllowAnonymous();
 
