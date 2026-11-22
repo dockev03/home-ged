@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
+import { useRoute, useRouter, type LocationQueryRaw } from 'vue-router'
 import { MOBILE_QUERY, useMediaQuery } from '../composables/mediaQuery'
+import { viewQuery } from '../filters/savedViews'
 import { KINDS } from '../gestion/kinds'
+import { useAuthStore } from '../stores/auth'
+import { useSavedViewsStore } from '../stores/savedViews'
 import { useUploadsStore } from '../stores/uploads'
 import UploadPanel from './UploadPanel.vue'
 import UserMenu from './UserMenu.vue'
@@ -15,14 +18,40 @@ import UserMenu from './UserMenu.vue'
 const route = useRoute()
 const router = useRouter()
 
+interface MenuItem {
+  label: string
+  to?: string
+  params?: Record<string, string>
+  query?: LocationQueryRaw
+  /** Vue sauvegardée ouverte par l'entrée (UI-08). */
+  viewId?: number
+}
+
+const auth = useAuthStore()
+const savedViews = useSavedViewsStore()
+onMounted(() => void savedViews.ensureLoaded())
+
 /** Entrées du menu ; celles sans route arrivent aux étapes suivantes. */
-const SECTIONS: { title?: string; items: { label: string; to?: string; params?: Record<string, string> }[] }[] = [
+const sections = computed<{ title?: string; items: MenuItem[] }[]>(() => [
   {
     items: [
       { label: 'Tableau de bord', to: 'accueil' },
       { label: 'Documents', to: 'documents' },
     ],
   },
+  ...(savedViews.sidebar.length
+    ? [
+        {
+          title: 'Vues',
+          items: savedViews.sidebar.map((view) => ({
+            label: view.name,
+            to: 'documents',
+            query: viewQuery(view, auth.user?.id ?? null),
+            viewId: view.id,
+          })),
+        },
+      ]
+    : []),
   {
     title: 'Gérer',
     items: [
@@ -33,7 +62,18 @@ const SECTIONS: { title?: string; items: { label: string; to?: string; params?: 
     title: 'Home-GED',
     items: [{ label: 'Scanner' }, { label: 'Mes liens' }],
   },
-]
+])
+
+/** Vue ouverte dans la liste des documents : elle est mise en avant à la place de « Documents ». */
+const openViewId = computed(() => (route.name === 'documents' && typeof route.query.vue === 'string' ? route.query.vue : null))
+
+function linkClasses(item: MenuItem) {
+  if (item.viewId !== undefined) return { 'active-class': '', 'exact-active-class': '', active: openViewId.value === String(item.viewId) }
+  if (item.to === 'documents') {
+    return { 'active-class': '', 'exact-active-class': '', active: openViewId.value === null && (route.name === 'documents' || route.name === 'document') }
+  }
+  return { 'active-class': item.to === 'accueil' ? '' : 'active', 'exact-active-class': 'active', active: false }
+}
 
 const drawerOpen = ref(false)
 const drawer = useTemplateRef<HTMLElement>('drawer')
@@ -156,17 +196,17 @@ onBeforeUnmount(() => document.body.classList.remove('overflow-hidden'))
         <button type="button" class="btn-close" aria-label="Fermer le menu" @click="drawerOpen = false" />
       </div>
       <div class="offcanvas-body flex-column">
-        <template v-for="section in SECTIONS" :key="section.title ?? 'principal'">
+        <template v-for="section in sections" :key="section.title ?? 'principal'">
           <h2 v-if="section.title" class="menu-titre">{{ section.title }}</h2>
           <ul class="nav nav-pills flex-column">
-            <li v-for="item in section.items" :key="item.label" class="nav-item">
+            <li v-for="item in section.items" :key="item.viewId ?? item.label" class="nav-item">
               <RouterLink
                 v-if="item.to"
                 class="nav-link"
-                :active-class="item.to === 'accueil' ? '' : 'active'"
-                exact-active-class="active"
-                :class="{ active: item.to === 'documents' && route.name === 'document' }"
-                :to="{ name: item.to, params: item.params }"
+                :active-class="linkClasses(item)['active-class']"
+                :exact-active-class="linkClasses(item)['exact-active-class']"
+                :class="{ active: linkClasses(item).active }"
+                :to="{ name: item.to, params: item.params, query: item.query }"
               >
                 {{ item.label }}
               </RouterLink>

@@ -113,7 +113,7 @@ public static class ManagedObject
         return (target, null);
     }
 
-    private static (JsonNode?, bool) Text(JsonNode? value, int min, int max, bool trim = true)
+    internal static (JsonNode?, bool) Text(JsonNode? value, int min, int max, bool trim = true)
     {
         if (value is not JsonValue v || !v.TryGetValue<string>(out var text))
         {
@@ -128,12 +128,12 @@ public static class ManagedObject
         return text.Length >= min && text.Length <= max ? (JsonValue.Create(text), true) : (null, false);
     }
 
-    private static (JsonNode?, bool) Integer(JsonNode? value, int min, int max) =>
+    internal static (JsonNode?, bool) Integer(JsonNode? value, int min, int max) =>
         value is JsonValue v && v.GetValueKind() == JsonValueKind.Number && v.TryGetValue<int>(out var n) && n >= min && n <= max
             ? (JsonValue.Create(n), true)
             : (null, false);
 
-    private static (JsonNode?, bool) Boolean(JsonNode? value) =>
+    internal static (JsonNode?, bool) Boolean(JsonNode? value) =>
         value is JsonValue v && v.GetValueKind() is JsonValueKind.True or JsonValueKind.False
             ? (JsonValue.Create(v.GetValue<bool>()), true)
             : (null, false);

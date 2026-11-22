@@ -123,6 +123,8 @@ public static class HomeGedApp
         api.MapAuth();
         api.MapDocuments();
         api.MapManagement();
+        api.MapSavedViews();
+        api.MapDashboard();
         // Toute autre route /api/* : 404 JSON, jamais la page de l'application.
         api.Map("/{**rest}", () => Results.Problem(statusCode: (int)HttpStatusCode.NotFound)).AllowAnonymous();
 
