@@ -85,6 +85,20 @@ public sealed class AppTests(AppFixture fixture) : IClassFixture<AppFixture>
     }
 
     [Fact]
+    public async Task Partage_sans_service_worker_renvoie_vers_l_ecran_avec_un_message()
+    {
+        using var handler = new HttpClientHandler { AllowAutoRedirect = false };
+        using var http = new HttpClient(handler) { BaseAddress = fixture.Http.BaseAddress };
+        using var form = new MultipartFormDataContent { { new ByteArrayContent([1, 2, 3]), "fichiers", "facture.pdf" } };
+
+        using var response = await http.PostAsync(new Uri("/partager", UriKind.Relative), form);
+
+        Assert.Equal(HttpStatusCode.SeeOther, response.StatusCode);
+        Assert.Equal("/partager?erreur=service-worker", response.Headers.Location?.OriginalString);
+        Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
+    }
+
+    [Fact]
     public void Configuration_invalide_bloque_le_demarrage()
     {
         var app = HomeGedApp.Create(["--Paperless:BaseUrl="], b => b.WebHost.UseUrls("http://127.0.0.1:0"));

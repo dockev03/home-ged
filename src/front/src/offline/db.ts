@@ -5,14 +5,16 @@
  * - `documents` : fiches consultées récemment (lecture hors ligne) ;
  * - `fichiers` : aperçu et vignette de ces fiches ;
  * - `envois` : fichiers en attente d'envoi à Paperless ;
- * - `session` : dernier utilisateur connecté sur l'appareil.
+ * - `session` : dernier utilisateur connecté sur l'appareil ;
+ * - `partages` : fichiers reçus d'une autre application (PWA-11), écrits par le service worker
+ *   (`public/partage-sw.js`, qui reprend le nom, la version et la liste des magasins ci-dessous).
  *
  * Sans IndexedDB (navigation privée restreinte, tests), toutes les opérations sont sans effet :
  * l'application fonctionne comme avant, sans hors-ligne.
  */
-export type StoreName = 'documents' | 'fichiers' | 'envois' | 'session'
+export type StoreName = 'documents' | 'fichiers' | 'envois' | 'session' | 'partages'
 
-export const STORE_NAMES: readonly StoreName[] = ['documents', 'fichiers', 'envois', 'session']
+export const STORE_NAMES: readonly StoreName[] = ['documents', 'fichiers', 'envois', 'session', 'partages']
 
 export interface Keyed {
   key: string
@@ -26,8 +28,9 @@ export interface OfflineBackend {
   clear(store: StoreName): Promise<void>
 }
 
-const DB_NAME = 'home-ged'
-const DB_VERSION = 1
+export const DB_NAME = 'home-ged'
+/** 2 : magasin « partages » (PWA-11). */
+export const DB_VERSION = 2
 
 function request<T>(req: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {

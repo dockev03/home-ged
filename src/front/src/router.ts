@@ -22,6 +22,8 @@ export const routes = [
       { path: 'liens', name: 'liens', component: () => import('./views/SharesView.vue') },
       { path: 'scanner', name: 'scanner', component: () => import('./views/ScanView.vue') },
       { path: 'sessions', name: 'sessions', component: () => import('./views/SessionsView.vue') },
+      // Fichiers reçus par « Partager vers Home-GED » (PWA-11).
+      { path: 'partager', name: 'partager', component: () => import('./views/ShareTargetView.vue') },
       {
         path: `gerer/:type(${KIND_SLUGS.join('|')})`,
         name: 'gerer',

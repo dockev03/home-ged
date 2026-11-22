@@ -143,6 +143,15 @@ public static class HomeGedApp
         // Toute autre route /api/* : 404 JSON, jamais la page de l'application.
         api.Map("/{**rest}", () => Results.Problem(statusCode: (int)HttpStatusCode.NotFound)).AllowAnonymous();
 
+        // « Partager vers Home-GED » (PWA-11) : le service worker reçoit normalement ce POST. S'il
+        // n'est pas encore actif, le fichier n'est pas lu : retour à l'écran avec un message.
+        app.MapPost("/partager", (HttpContext context) =>
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            context.Response.Headers.Location = "/partager?erreur=service-worker";
+            return Results.StatusCode(StatusCodes.Status303SeeOther);
+        });
+
         // Front Vue buildé (wwwroot) : fichiers fingerprintés en cache long, index.html jamais en cache.
         // Le worker de recadrage reçoit sa CSP ici, pour un fichier réellement servi seulement (jamais
         // pour index.html renvoyé par le repli).

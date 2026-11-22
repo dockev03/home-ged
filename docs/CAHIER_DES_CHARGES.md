@@ -97,7 +97,7 @@ Les codes reprennent la grille de fonctionnalités validée (`FCT_HGED.xlsx`).
 | PWA-08 | ~~Raccourcis vers les vues sauvegardées~~ → remplacée par UI-08 | — |
 | PWA-09 | Cache hors-ligne des derniers documents consultés | V1 |
 | PWA-10 | File d'attente des uploads hors-ligne (IndexedDB), renvoi au retour du réseau | V1 |
-| PWA-11 | Web Share Target : « Partager vers Home-GED » depuis une autre appli (Android) | V1 |
+| PWA-11 | Web Share Target : « Partager vers Home-GED » depuis une autre appli (Android ; non pris en charge par Safari iOS, qui passe par « Ajouter » ou « Scanner ») | V1 |
 | PWA-12 | ~~Tableau de bord « Foyer »~~ → remplacée par UI-09 | — |
 
 #### F-SCAN — Capture caméra (A2)
