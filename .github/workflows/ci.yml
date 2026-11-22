@@ -90,6 +90,9 @@ jobs:
           PAPERLESS_BIND_ADDR: 0.0.0.0
           PAPERLESS_ADMIN_USER: ci
           PAPERLESS_ADMIN_PASSWORD: ci-uniquement
+          # Chaque fixture se connecte : la limite par défaut (5/min par IP) ferait échouer les tests.
+          # La production garde sa limite (deploy/docker-compose.yml).
+          PAPERLESS_TOKEN_THROTTLE_RATE: 1000/min
         options: >-
           --health-cmd "curl -fs http://localhost:8000/ -o /dev/null"
           --health-interval 10s --health-timeout 5s --health-retries 30
@@ -148,4 +151,10 @@ jobs:
           context: ${{ matrix.image.context }}
           file: ${{ matrix.image.file }}
           push: false
+          # Image chargée dans le démon Docker du runner pour le test rapide ci-dessous.
+          load: ${{ matrix.image.name == 'home-ged' }}
+          tags: ${{ matrix.image.name }}:ci
           cache-from: type=gha,scope=${{ matrix.image.name }}
+      - name: Test rapide de l'image (healthcheck, en-têtes de sécurité, utilisateur non root)
+        if: matrix.image.name == 'home-ged'
+        run: tests/smoke/image.sh home-ged:ci

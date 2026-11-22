@@ -9,10 +9,11 @@
 | `broker` | `valkey:9-alpine` | File de tâches (compatible Redis) |
 | `tika` | `apache/tika:3.3.1.0` | Extraction du texte des fichiers Office et e-mails |
 | `gotenberg` | `gotenberg:8.38` | Conversion Office → PDF |
+| `init-db` | `postgres:18-alpine` | Crée la base `homeged` et son rôle au démarrage, puis s'arrête |
 | `app` | `ghcr.io/dockev03/home-ged` | Home-GED : PWA et BFF (seul service exposé à Internet) |
 | `backup` | `ghcr.io/dockev03/home-ged-backup` | `pg_dump` + restic vers le NAS, chaque nuit |
 
-Les deux images Home-GED sont construites par la CI GitHub (`.github/workflows/ci.yml`) à chaque push sur `main` et à chaque tag `vX.Y.Z`. La variable `HOMEGED_VERSION` choisit le tag déployé : `main`, `sha-xxxxxxx` ou une version (`1.0.0`).
+Les deux images Home-GED sont construites par la CI GitHub (`.github/workflows/release.yml`) à chaque push sur `main` et à chaque tag `vX.Y.Z`. La variable `HOMEGED_VERSION` choisit le tag déployé : `main`, `sha-xxxxxxx` ou une version (`1.0.0`).
 
 Paperless est figé en version exacte. PostgreSQL et Valkey sont figés en version majeure, comme dans la configuration officielle de Paperless. Les mises à jour se font volontairement, après lecture du changelog.
 
@@ -22,84 +23,83 @@ Choix de configuration notables :
 - aucun port publié : seul NPM joint Home-GED et Paperless ;
 - conteneur Home-GED durci : système de fichiers en lecture seule, aucune capacité Linux, utilisateur non root, image « chiseled » sans shell.
 
-## Installation, dans l'ordre
+## Installation
 
-1. **Préparer le NAS et la clé SSH** : [sauvegardes.md](sauvegardes.md), étapes 1 à 6.
-2. **Récupérer le dépôt sur le VPS** :
+Deux façons d'installer, au choix : **Docker en ligne de commande** (le script fait tout) ou **Portainer** (tout se fait dans l'interface web). Dans les deux cas :
 
-   ```bash
-   sudo git clone https://github.com/dockev03/home-ged.git /opt/home-ged/repo
-   ```
+- la base `homeged` et son rôle sont **créés automatiquement** par le service `init-db` (voir [Base homeged](#base-homeged)) ;
+- le premier compte administrateur Paperless peut être créé automatiquement (`PAPERLESS_ADMIN_USER` et `PAPERLESS_ADMIN_PASSWORD`).
 
-   Si le dépôt est privé, utilise une clé de déploiement GitHub en lecture seule, ou un token à portée limitée.
+### Avant de commencer (une seule fois)
 
-3. **Créer le fichier `.env`** à partir de `deploy/.env.example` et générer les secrets :
+1. **Nginx Proxy Manager** tourne déjà sur le VPS.
+2. **Clé SSH de sauvegarde et NAS** : [sauvegardes.md](sauvegardes.md), étapes 1 à 6. Tu peux le faire après coup, mais la sauvegarde échouera tant que ce n'est pas fait.
+3. **Accès aux images privées** : GHCR n'accepte pas les tokens « fine-grained ». Sur GitHub, **Settings** > **Developer settings** > **Personal access tokens** > **Tokens (classic)**, crée un token avec la seule portée `read:packages`. Il sert de mot de passe à l'étape « connexion au registre » ci-dessous.
 
-   ```bash
-   cd /opt/home-ged/repo/deploy && sudo cp .env.example .env && sudo chmod 600 .env
-   ```
+### Option A : Docker en ligne de commande
 
-   ```bash
-   openssl rand -base64 48 | tr -d '\n/+=' | cut -c1-64
-   ```
+```bash
+sudo git clone https://github.com/dockev03/home-ged.git /opt/home-ged/repo
+```
 
-4. **Autoriser le VPS à télécharger les images** (paquets GHCR privés). GHCR n'accepte pas les tokens « fine-grained » : sur GitHub, **Settings** > **Developer settings** > **Personal access tokens** > **Tokens (classic)**, crée un token avec la seule portée `read:packages`. Puis, sur le VPS :
+Si le dépôt est privé, utilise une clé de déploiement GitHub en lecture seule, ou un token à portée limitée.
 
-   ```bash
-   sudo docker login ghcr.io -u dockev03
-   ```
+```bash
+sudo docker login ghcr.io -u dockev03
+```
 
-   Le mot de passe demandé est ce token.
+Le mot de passe demandé est le token `read:packages`.
 
-5. **Démarrer la base, puis créer la base `homeged`** (une seule fois) :
+```bash
+cd /opt/home-ged/repo/deploy && sudo ./install.sh
+```
 
-   ```bash
-   sudo docker compose pull
-   ```
+Le script :
 
-   ```bash
-   sudo docker compose up -d db
-   ```
+1. crée `.env` à partir de `.env.example` (droits `600`) ;
+2. génère les secrets encore vides (`PAPERLESS_SECRET_KEY`, `POSTGRES_PASSWORD`, `HOMEGED_DB_PASSWORD`, `RESTIC_PASSWORD`), sans jamais remplacer un secret déjà renseigné ;
+3. détecte le réseau Docker de NPM et calcule `NPM_SUBNET` ;
+4. s'arrête en listant ce qui reste à saisir dans `.env` (`PAPERLESS_URL`, NAS de sauvegarde…) ;
+5. une fois `.env` complété et le script relancé : télécharge les images, démarre la stack et attend que Home-GED soit prêt.
 
-   Puis suis [Créer la base homeged](#créer-la-base-homeged).
+> ⚠️ Recopie `RESTIC_PASSWORD` dans ton gestionnaire de mots de passe, **hors du VPS** : sans lui, les sauvegardes sont illisibles.
 
-6. **Démarrer la stack** :
+Le script se relance sans risque, par exemple pour une mise à jour.
 
-   ```bash
-   sudo docker compose up -d
-   ```
+### Option B : Portainer
 
-7. **Publier Home-GED et Paperless via NPM** : [npm.md](npm.md).
-8. **Configurer Paperless** : [configuration-paperless.md](configuration-paperless.md).
-9. **Lancer la première sauvegarde et tester la restauration** : [sauvegardes.md](sauvegardes.md) §7, puis [restauration.md](restauration.md).
-
-### Créer la base homeged
-
-Home-GED a sa propre base dans le même PostgreSQL, avec un rôle `homeged` qui n'a aucun droit sur la base Paperless. Il y stocke ses sessions et les clés de chiffrement des tokens Paperless. Les tables sont créées par Home-GED à son démarrage.
-
-Le script d'initialisation de PostgreSQL ne s'exécute qu'à la création du volume `pgdata`, déjà fait : la base se crée à la main, une seule fois.
-
-1. Créer le rôle. Au mot de passe demandé, colle la valeur de `HOMEGED_DB_PASSWORD` du fichier `.env` :
+1. **Préparer les variables.** Le plus simple est de lancer, sur le VPS, `sudo ./install.sh --env-seulement` depuis une copie du dossier `deploy/` : il produit un `.env` complet (secrets, réseau et sous-réseau NPM) sans rien démarrer. Sinon, pars de `.env.example`, génère chaque secret avec la commande ci-dessous et trouve le sous-réseau NPM comme indiqué dans [npm.md](npm.md) :
 
    ```bash
-   sudo docker compose exec db createuser -U paperless --pwprompt homeged
+   openssl rand -base64 48 | tr -d '\n/+=' | cut -c1-48
    ```
 
-2. Créer la base, propriété du rôle :
+2. **Déclarer le registre** (une seule fois) : **Registries** > **Add registry** > **Custom registry**, URL `ghcr.io`, utilisateur `dockev03`, mot de passe : le token `read:packages`.
+3. **Créer la stack** : **Stacks** > **Add stack**, nom `home-ged`, puis au choix :
+   - **Web editor** : colle le contenu de `deploy/docker-compose.yml` ;
+   - **Repository** : URL du dépôt, chemin `deploy/docker-compose.yml` (identifiants Git si le dépôt est privé). Portainer peut alors mettre à jour la stack à chaque modification du dépôt.
+4. **Variables** : dans **Environment variables**, clique sur **Load variables from .env file** et charge le `.env` préparé à l'étape 1. Vérifie que toutes les valeurs apparaissent.
+5. **Deploy the stack**. Au premier démarrage, Paperless met une à deux minutes à s'initialiser ; Home-GED démarre ensuite. Le conteneur `init-db` s'arrête normalement après quelques secondes (état *exited*, code 0) : c'est attendu.
 
-   ```bash
-   sudo docker compose exec db createdb -U paperless -O homeged homeged
-   ```
+### Ensuite, dans les deux cas
 
-3. Empêcher les autres rôles de s'y connecter, et `homeged` de se connecter à la base Paperless :
+1. **Publier Home-GED et Paperless via NPM** : [npm.md](npm.md).
+2. **Configurer Paperless** : [configuration-paperless.md](configuration-paperless.md). Si tu as utilisé `PAPERLESS_ADMIN_PASSWORD`, active le 2FA de ce compte puis vide la variable.
+3. **Créer le compte de service des liens de partage** : [Compte de service des liens](#compte-de-service-des-liens).
+4. **Lancer la première sauvegarde et tester la restauration** : [sauvegardes.md](sauvegardes.md) §7, puis [restauration.md](restauration.md).
+5. **Dérouler la recette** : [../recette/criteres-v1.md](../recette/criteres-v1.md).
 
-   ```bash
-   sudo docker compose exec db psql -U paperless -d paperless \
-     -c "REVOKE CONNECT ON DATABASE homeged FROM PUBLIC" \
-     -c "REVOKE CONNECT ON DATABASE paperless FROM PUBLIC"
-   ```
+### Base homeged
 
-   Le propriétaire d'une base garde ses droits : `paperless` reste connecté à `paperless`, et `homeged` à `homeged`.
+Home-GED a sa propre base dans le même PostgreSQL, avec un rôle `homeged` qui n'a aucun droit sur la base Paperless. Il y stocke ses sessions, ses liens de partage et les clés de chiffrement des tokens Paperless. Les tables sont créées par Home-GED à son démarrage.
+
+Le service `init-db` s'exécute à chaque démarrage de la stack, avant Home-GED et la sauvegarde, puis s'arrête. Il :
+
+- crée le rôle `homeged` et la base `homeged` s'ils n'existent pas ;
+- aligne le mot de passe du rôle sur `HOMEGED_DB_PASSWORD` : pour changer ce mot de passe, il suffit de modifier la variable et de redémarrer la stack ;
+- retire l'accès par défaut (`PUBLIC`) aux deux bases : `homeged` ne peut pas se connecter à la base Paperless, ni l'inverse. Le propriétaire d'une base garde ses droits.
+
+Il ne supprime jamais rien : sur une installation existante où la base a été créée à la main, il ne fait que vérifier.
 
 ### Connexion à Home-GED
 
@@ -131,19 +131,23 @@ La page publique lit les documents dans Paperless avec un **compte de service en
 
 Pour couper l'accès public d'un coup, supprime ce token dans Paperless : tous les liens répondent alors « momentanément indisponible ».
 
-### Et Portainer ?
-
-Toutes les images sont désormais téléchargeables : la stack est entièrement gérable depuis Portainer. Déclare le registre une fois (**Registries** > **Add registry** > **Custom registry**, URL `ghcr.io`, utilisateur `dockev03`, mot de passe : le token `read:packages`), puis crée la stack depuis le dépôt Git (**Stacks** > **Add stack** > **Repository**, chemin `deploy/docker-compose.yml`) en saisissant les variables de `.env.example`.
-
 ## Mettre à jour Home-GED
 
-> **Première mise à jour avec la base `homeged`** (version qui ajoute la connexion) : ajoute `HOMEGED_DB_PASSWORD` dans `.env` (ou dans les variables de la stack Portainer), puis suis [Créer la base homeged](#créer-la-base-homeged) **avant** de mettre à jour. Sinon Home-GED ne démarre pas, et la sauvegarde échoue sur la base manquante.
+Avec le script (Docker) :
+
+```bash
+cd /opt/home-ged/repo/deploy && sudo git pull && sudo ./install.sh
+```
+
+Ou à la main :
 
 ```bash
 sudo docker compose pull app backup && sudo docker compose up -d
 ```
 
-Avec `HOMEGED_VERSION=main`, cette commande prend le dernier build de `main`. Pour figer une version, mets un tag (`1.0.0`) ou un `sha-xxxxxxx`.
+Avec Portainer : ouvre la stack, puis **Update the stack** en cochant **Re-pull image and redeploy** (ou **Pull and redeploy** pour une stack liée au dépôt Git).
+
+Avec `HOMEGED_VERSION=main`, cela prend le dernier build de `main`. Pour figer une version, mets un tag (`1.0.0`) ou un `sha-xxxxxxx`.
 
 ## Mettre à jour Paperless
 

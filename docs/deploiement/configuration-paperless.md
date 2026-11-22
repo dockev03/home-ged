@@ -4,6 +4,8 @@
 
 ## 1. Compte administrateur
 
+S'il n'a pas été créé au démarrage (`PAPERLESS_ADMIN_USER` et `PAPERLESS_ADMIN_PASSWORD`) :
+
 ```bash
 docker compose exec webserver python3 manage.py createsuperuser
 ```
@@ -13,6 +15,7 @@ Puis, dans l'interface : **Mon profil** > **Authentification à deux facteurs** 
 ## 2. Utilisateurs et groupe « Foyer » (G1, G2, G4)
 
 1. **Paramètres** > **Utilisateurs et groupes** > créer le groupe `Foyer`, avec les droits *afficher / ajouter / modifier* sur Documents, Tags, Correspondants, Types de document, Champs personnalisés, Vues sauvegardées et Notes. Pas de suppression ni d'administration.
+   **Indispensable pour Home-GED** : le droit *afficher* sur **Paramètres de l'interface** (UI Settings). Home-GED lit l'utilisateur connecté par ce biais ; sans lui, la connexion échoue.
    Pour les onglets de la fiche document de Home-GED, ajouter au groupe les droits *afficher* sur **Utilisateurs** et **Groupes** (choisir à qui partager un document, onglet Permissions) et sur **Historique** (journal d'audit, onglet Historique). Sans eux, Home-GED affiche les permissions par numéro et masque l'historique.
 2. Créer un compte par personne (non superutilisateur), membre de `Foyer`. Chacun active ensuite son 2FA.
 3. Chacun règle ses **permissions par défaut** (**Paramètres** > **Permissions**) : groupe `Foyer` en *afficher* et *modifier*. Elles s'appliquent aux étiquettes, correspondants, types et chemins créés à la volée depuis la fiche document de Home-GED, comme dans l'interface Paperless.
