@@ -26,6 +26,39 @@ export default defineConfig({
         theme_color: '#2f6f5e',
         background_color: '#ffffff',
         categories: ['productivity', 'utilities'],
+        // « Partager vers Home-GED » depuis une autre application (PWA-11, Android) : reçu par le
+        // service worker (public/partage-sw.js), jamais par le serveur.
+        share_target: {
+          action: '/partager',
+          method: 'POST',
+          enctype: 'multipart/form-data',
+          params: {
+            files: [
+              {
+                name: 'fichiers',
+                accept: [
+                  'application/pdf',
+                  'image/*',
+                  'text/plain',
+                  'application/msword',
+                  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                  'application/vnd.ms-excel',
+                  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                  'application/vnd.oasis.opendocument.text',
+                  'application/vnd.oasis.opendocument.spreadsheet',
+                  '.pdf',
+                  '.doc',
+                  '.docx',
+                  '.xls',
+                  '.xlsx',
+                  '.odt',
+                  '.ods',
+                  '.txt',
+                ],
+              },
+            ],
+          },
+        },
         icons: [
           { src: '/pwa-192x192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
           { src: '/pwa-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
@@ -35,7 +68,9 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
         // OpenCV (environ 10 Mo, écran Scanner seul) : téléchargé à la première utilisation, pas à l'installation.
-        globIgnores: ['**/opencv-*.js'],
+        globIgnores: ['**/opencv-*.js', 'partage-sw.js'],
+        // Réception des fichiers partagés (PWA-11), chargée avant les routes Workbox.
+        importScripts: ['/partage-sw.js'],
         cleanupOutdatedCaches: true,
         // Navigation hors ligne vers l'application ; jamais pour l'API, les sondes ni les liens publics.
         navigateFallback: '/index.html',

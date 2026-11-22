@@ -43,8 +43,9 @@ export async function forgetEverything() {
 
 /**
  * Session expirée ou révoquée : les documents gardés pour la lecture hors ligne sont effacés et le
- * démarrage hors ligne n'est plus possible. Les envois en attente sont gardés pour partir quand le
- * même utilisateur se reconnectera ; un autre compte les effacera (voir rememberUser).
+ * démarrage hors ligne n'est plus possible. Les envois en attente et les fichiers partagés (PWA-11)
+ * sont gardés pour partir quand le même utilisateur se reconnectera ; un autre compte les effacera
+ * (voir rememberUser).
  */
 export async function expireSession() {
   await clearStores(['documents', 'fichiers'])

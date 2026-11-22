@@ -21,4 +21,9 @@ export default tseslint.config(
       'vue/html-self-closing': 'off',
     },
   },
+  {
+    // Script chargé par le service worker (PWA-11).
+    files: ['public/partage-sw.js'],
+    languageOptions: { globals: { ...globals.serviceworker } },
+  },
 )
