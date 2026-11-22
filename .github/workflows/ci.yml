@@ -4,9 +4,9 @@ name: CI
 
 on:
   pull_request:
-    branches: [dev, main]
+    branches: [DEV, main]
   push:
-    branches: [dev]
+    branches: [DEV]
   workflow_dispatch:
   # Réutilisé par release.yml avant la publication des images.
   workflow_call:

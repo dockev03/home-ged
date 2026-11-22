@@ -1,5 +1,5 @@
 # Publication Home-GED : rejoue la CI, puis publie les images sur GHCR.
-# Uniquement sur main (merge de dev) et sur les tags de version.
+# Uniquement sur main (merge de DEV) et sur les tags de version.
 name: Release
 
 on:

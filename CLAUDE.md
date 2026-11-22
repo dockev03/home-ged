@@ -19,8 +19,8 @@ Home-GED : surcouche web (PWA mobile-first) au-dessus de **Paperless-ngx 3.x**, 
 
 ## Git
 
-- Branches de travail `feature/etape-N-sujet`, `feature/`, `fix/` ou `docs/sujet`, créées depuis `dev`, jamais réutilisées.
-- Flux : branche de travail → PR vers `dev` (CI : tests, audits, build Docker sans publication) → PR `dev` → `main` (publication des images GHCR).
-- Jamais de commit direct sur `dev`, `main`, `master` ou `staging`.
+- Branches de travail `feature/etape-N-sujet`, `feature/`, `fix/` ou `docs/sujet`, créées depuis `DEV`, jamais réutilisées.
+- Flux : branche de travail → PR vers `DEV` (CI : tests, audits, build Docker sans publication) → PR `DEV` → `main` (publication des images GHCR).
+- Jamais de commit direct sur `DEV`, `main`, `master` ou `staging`.
 - Aucun commit ni push sans accord explicite ; présenter le message (Conventional Commits en français) avant.
 - Aucun identifiant de modèle d'IA dans commits, PR ou fichiers (pas de `Co-Authored-By` d'IA).
