@@ -128,8 +128,9 @@ public sealed class ShareAppFixture : HomeGedAppFixture
 
     public override async Task DisposeAsync()
     {
-        await base.DisposeAsync();
+        // Avant la base : elle libère le client Paperless utilisé pour la suppression.
         await DeletePaperlessUserAsync(ServiceUserId);
+        await base.DisposeAsync();
     }
 }
 
