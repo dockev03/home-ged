@@ -16,7 +16,8 @@ internal static class FakePaperlessDocuments
         var path = request.RequestUri!.AbsolutePath;
         if (!path.StartsWith("/api/documents/", StringComparison.Ordinal)
             && !path.StartsWith("/api/tags/", StringComparison.Ordinal)
-            && !path.StartsWith("/api/correspondents/", StringComparison.Ordinal))
+            && !path.StartsWith("/api/correspondents/", StringComparison.Ordinal)
+            && path is not ("/api/tasks/" or "/api/users/" or "/api/groups/"))
         {
             return null;
         }
@@ -31,8 +32,76 @@ internal static class FakePaperlessDocuments
         var ordering = query.TryGetValue("ordering", out var o) ? o.ToString() : null;
         var page = query.TryGetValue("page", out var p) ? p.ToString() : null;
         var method = request.Method.Method;
+        var fullPerms = query.ContainsKey("full_perms");
         switch (path)
         {
+            case "/api/documents/5/" when fullPerms && method == "PATCH" && token == "tok-bob":
+                return FakePaperless.Json(HttpStatusCode.Forbidden, """{"detail":"Insufficient permissions."}""");
+
+            case "/api/documents/5/" when fullPerms && method == "PATCH":
+                using (var sent = JsonDocument.Parse(body!))
+                {
+                    return FakePaperless.Json(HttpStatusCode.OK, $$"""
+                        {"id":5,"title":"Facture","owner":{{sent.RootElement.GetProperty("owner").GetRawText()}},
+                         "permissions":{{sent.RootElement.GetProperty("set_permissions").GetRawText()}}}
+                        """);
+                }
+
+            case "/api/documents/5/" when fullPerms:
+                return FakePaperless.Json(HttpStatusCode.OK, """
+                    {"id":5,"title":"Facture","content":"secret","owner":1,
+                     "permissions":{"view":{"users":[2],"groups":[1]},"change":{"users":[],"groups":[]}}}
+                    """);
+
+            case "/api/documents/5/history/" when token == "tok-bob":
+                return new HttpResponseMessage(HttpStatusCode.Forbidden) { Content = new StringContent("Insufficient permissions") };
+
+            case "/api/documents/5/history/":
+                return FakePaperless.Json(HttpStatusCode.OK, """
+                    [{"id":1,"timestamp":"2026-11-02T10:00:00Z","action":"update","changes":{"title":["A","B"]},"actor":{"id":1,"username":"alice"}}]
+                    """);
+
+            case "/api/documents/6/history/":
+                return new HttpResponseMessage(HttpStatusCode.BadRequest) { Content = new StringContent("Audit log is disabled") };
+
+            case "/api/documents/5/update_version/":
+                return request.Content!.Headers.ContentType!.MediaType == "multipart/form-data"
+                    ? FakePaperless.Json(HttpStatusCode.OK, "\"3f2504e0-4f89-11d3-9a0c-0305e82c3301\"")
+                    : FakePaperless.Json(HttpStatusCode.BadRequest, """{"document":["No file was submitted."]}""");
+
+            case "/api/documents/5/versions/7/" when method == "PATCH":
+                return FakePaperless.Json(HttpStatusCode.OK, body!);
+
+            case "/api/documents/5/versions/7/" when method == "DELETE":
+                return new HttpResponseMessage(HttpStatusCode.NoContent);
+
+            case "/api/documents/5/versions/9/" when method == "DELETE":
+                return FakePaperless.Json(HttpStatusCode.BadRequest, """{"detail":"Cannot delete the root/original version."}""");
+
+            case "/api/tasks/" when query["task_id"] == "3f2504e0-4f89-11d3-9a0c-0305e82c3301":
+                return FakePaperless.Json(HttpStatusCode.OK, """
+                    {"count":1,"next":null,"results":[{"id":4,"task_id":"3f2504e0-4f89-11d3-9a0c-0305e82c3301","status":"success",
+                      "input_data":{"filename":"facture.pdf"},"result_data":{"document_id":12},"related_document_ids":[12],"owner":1}]}
+                    """);
+
+            case "/api/tasks/" when query["task_id"] == "3f2504e0-4f89-11d3-9a0c-0305e82c3302":
+                return FakePaperless.Json(HttpStatusCode.OK, """
+                    {"count":1,"next":null,"results":[{"id":5,"task_id":"3f2504e0-4f89-11d3-9a0c-0305e82c3302","status":"failure",
+                      "result_data":{"reason":"Not consuming facture.pdf: It is a duplicate of Facture (#5)."},"related_document_ids":[]}]}
+                    """);
+
+            case "/api/tasks/":
+                return FakePaperless.Json(HttpStatusCode.OK, """{"count":0,"next":null,"results":[]}""");
+
+            case "/api/users/":
+                return FakePaperless.Json(HttpStatusCode.OK, """
+                    {"count":1,"next":null,"results":[{"id":2,"username":"bob","first_name":"Bob","last_name":"M.","email":"bob@example.test",
+                      "password":"**********","is_superuser":false,"user_permissions":["view_document"],"groups":[1]}]}
+                    """);
+
+            case "/api/groups/":
+                return FakePaperless.Json(HttpStatusCode.OK, """{"count":1,"next":null,"results":[{"id":1,"name":"Foyer","permissions":["view_document"]}]}""");
+
             case "/api/documents/5/" when method == "GET":
                 return FakePaperless.Json(HttpStatusCode.OK, """{"id":5,"title":"Facture","content":"Texte complet","tags":[1]}""");
 
@@ -73,10 +142,13 @@ internal static class FakePaperlessDocuments
             case "/api/documents/" when token == "tok-bob":
                 return FakePaperless.Json(HttpStatusCode.Forbidden, """{"detail":"Forbidden"}""");
 
+            case "/api/documents/" when query.ContainsKey("fields"):
+                return FakePaperless.Json(HttpStatusCode.OK, """{"count":3,"next":null,"results":[{"id":7},{"id":3},{"id":9}]}""");
+
             case "/api/documents/":
                 return FakePaperless.Json(HttpStatusCode.OK, """
                     {"count":30,"next":"http://paperless:8000/api/documents/?page=2","previous":null,
-                     "all":[5,6],"results":[{"id":5,"title":"Facture","tags":[1]}]}
+                     "results":[{"id":5,"title":"Facture","tags":[1]}]}
                     """);
 
             case "/api/documents/5/thumb/":
@@ -201,7 +273,6 @@ public sealed class DocumentEndpointsTests(AuthAppFixture fixture) : IClassFixtu
         using var json = JsonDocument.Parse(body);
         Assert.Equal(30, json.RootElement.GetProperty("count").GetInt32());
         Assert.Equal("Facture", json.RootElement.GetProperty("results")[0].GetProperty("title").GetString());
-        Assert.Equal(2, json.RootElement.GetProperty("all").GetArrayLength());
     }
 
     [Theory]
@@ -342,9 +413,12 @@ public sealed class DocumentEndpointsTests(AuthAppFixture fixture) : IClassFixtu
 
         if (body is not null)
         {
-            request.Content = body is string json
-                ? new StringContent(json, System.Text.Encoding.UTF8, "application/json")
-                : JsonContent.Create(body);
+            request.Content = body switch
+            {
+                HttpContent content => content,
+                string json => new StringContent(json, System.Text.Encoding.UTF8, "application/json"),
+                _ => JsonContent.Create(body),
+            };
         }
 
         return await fixture.Http.SendAsync(request);
@@ -585,5 +659,221 @@ public sealed class DocumentEndpointsTests(AuthAppFixture fixture) : IClassFixtu
         DocumentEndpoints.ApplyDefaultPermissions(System.Text.Json.Nodes.JsonNode.Parse("""{"settings":{}}""")!.AsObject(), target);
 
         Assert.Empty(target);
+    }
+
+    [Fact]
+    public async Task Historique_relaye()
+    {
+        var cookie = await LoginAsync();
+
+        using var response = await GetAsync("/api/documents/5/history", cookie);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("\"title\"", await response.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Historique_reserve_et_desactive_expliques()
+    {
+        var bob = await LoginAsync("bob", "123456");
+        using var refused = await GetAsync("/api/documents/5/history", bob);
+        Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+        Assert.Equal("historique_reserve", await ErrorCodeAsync(refused));
+
+        var alice = await LoginAsync();
+        using var disabled = await GetAsync("/api/documents/6/history", alice);
+        Assert.Equal(HttpStatusCode.BadRequest, disabled.StatusCode);
+        Assert.Equal("historique_desactive", await ErrorCodeAsync(disabled));
+    }
+
+    [Fact]
+    public async Task Permissions_lues_sans_le_reste_du_document()
+    {
+        var cookie = await LoginAsync();
+
+        using var response = await GetAsync("/api/documents/5/permissions", cookie);
+
+        Assert.Equal("full_perms=true", fixture.Paperless.LastRequest!.RequestUri!.Query.TrimStart('?'));
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Equal("""{"owner":1,"permissions":{"view":{"users":[2],"groups":[1]},"change":{"users":[],"groups":[]}}}""", body);
+    }
+
+    [Fact]
+    public async Task Permissions_modifiees_par_liste_blanche()
+    {
+        var cookie = await LoginAsync();
+
+        using var response = await SendAsync(HttpMethod.Patch, "/api/documents/5/permissions", cookie, """
+            {"owner":null,"set_permissions":{"view":{"users":[3,2,3],"groups":[1]},"change":{"users":[],"groups":[]}}}
+            """);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(HttpMethod.Patch, fixture.Paperless.LastRequest!.Method);
+        Assert.Equal(
+            """{"owner":null,"set_permissions":{"view":{"users":[2,3],"groups":[1]},"change":{"users":[],"groups":[]}}}""",
+            fixture.Paperless.LastBody);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("owner").ValueKind);
+    }
+
+    [Theory]
+    [InlineData("""{"set_permissions":{"view":{"users":[1]}}}""")]
+    [InlineData("""{"owner":1}""")]
+    [InlineData("""{"owner":"1","set_permissions":{"view":{},"change":{}}}""")]
+    [InlineData("""{"title":"x","set_permissions":{"view":{},"change":{}}}""")]
+    [InlineData("""{"set_permissions":{"view":{"users":[0]},"change":{}}}""")]
+    [InlineData("""{"set_permissions":{"view":{},"change":{},"delete":{}}}""")]
+    public async Task Permissions_invalides_refusees(string body)
+    {
+        var cookie = await LoginAsync();
+        var calls = fixture.Paperless.Calls;
+
+        using var response = await SendAsync(HttpMethod.Patch, "/api/documents/5/permissions", cookie, body);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(calls, fixture.Paperless.Calls);
+    }
+
+    [Fact]
+    public async Task Permissions_refusees_a_qui_n_est_pas_proprietaire()
+    {
+        var cookie = await LoginAsync("bob", "123456");
+
+        using var response = await SendAsync(HttpMethod.Patch, "/api/documents/5/permissions", cookie,
+            """{"set_permissions":{"view":{},"change":{}}}""");
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Contains("propriétaire", await response.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Utilisateurs_sans_email_ni_droits()
+    {
+        var cookie = await LoginAsync();
+
+        using var users = await GetAsync("/api/references/utilisateurs", cookie);
+        using var groups = await GetAsync("/api/references/groupes", cookie);
+
+        Assert.Equal("""[{"id":2,"username":"bob","first_name":"Bob","last_name":"M."}]""", await users.Content.ReadAsStringAsync());
+        Assert.Equal("""[{"id":1,"name":"Foyer"}]""", await groups.Content.ReadAsStringAsync());
+    }
+
+    [Theory]
+    [InlineData("utilisateurs")]
+    [InlineData("groupes")]
+    [InlineData("champs")]
+    public async Task Pas_de_creation_hors_des_listes_prevues(string kind)
+    {
+        var cookie = await LoginAsync();
+
+        using var response = await SendAsync(HttpMethod.Post, $"/api/references/{kind}", cookie, new { name = "x" });
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Nouvelle_version_relayee_en_flux()
+    {
+        var cookie = await LoginAsync();
+        using var form = new MultipartFormDataContent
+        {
+            { new ByteArrayContent([37, 80, 68, 70]) { Headers = { ContentType = new("application/pdf") } }, "document", "v2.pdf" },
+            { new StringContent("Signée"), "version_label" },
+        };
+
+        using var response = await SendAsync(HttpMethod.Post, "/api/documents/5/versions", cookie, form);
+
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+        Assert.Equal("""{"tache":"3f2504e0-4f89-11d3-9a0c-0305e82c3301"}""", await response.Content.ReadAsStringAsync());
+        var sent = fixture.Paperless.LastRequest!;
+        Assert.Equal("/api/documents/5/update_version/", sent.RequestUri!.AbsolutePath);
+        Assert.Equal("tok-alice", sent.Headers.Authorization!.Parameter);
+        Assert.Contains("name=document; filename=v2.pdf", fixture.Paperless.LastBody, StringComparison.Ordinal);
+        Assert.Contains("Signée", fixture.Paperless.LastBody, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Nouvelle_version_exige_un_envoi_de_fichier()
+    {
+        var cookie = await LoginAsync();
+        var calls = fixture.Paperless.Calls;
+
+        using var response = await SendAsync(HttpMethod.Post, "/api/documents/5/versions", cookie, new { document = "x" });
+
+        Assert.Equal(HttpStatusCode.UnsupportedMediaType, response.StatusCode);
+        Assert.Equal(calls, fixture.Paperless.Calls);
+    }
+
+    [Fact]
+    public async Task Version_renommee_et_supprimee()
+    {
+        var cookie = await LoginAsync();
+
+        using var renamed = await SendAsync(HttpMethod.Patch, "/api/documents/5/versions/7", cookie, new { versionLabel = "  Signée  " });
+        Assert.Equal(HttpStatusCode.OK, renamed.StatusCode);
+        Assert.Equal("Signée", LastPaperlessBody().GetProperty("version_label").GetString());
+
+        using var cleared = await SendAsync(HttpMethod.Patch, "/api/documents/5/versions/7", cookie, new { versionLabel = "" });
+        Assert.Equal("""{"version_label":null}""", fixture.Paperless.LastBody);
+
+        using var deleted = await SendAsync(HttpMethod.Delete, "/api/documents/5/versions/7", cookie);
+        Assert.Equal(HttpStatusCode.NoContent, deleted.StatusCode);
+
+        using var root = await SendAsync(HttpMethod.Delete, "/api/documents/5/versions/9", cookie);
+        Assert.Equal(HttpStatusCode.BadRequest, root.StatusCode);
+        Assert.Contains("root/original", await root.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Libelle_de_version_trop_long_refuse()
+    {
+        var cookie = await LoginAsync();
+
+        using var response = await SendAsync(HttpMethod.Patch, "/api/documents/5/versions/7", cookie, new { versionLabel = new string('x', 65) });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Apercu_d_une_version_precise()
+    {
+        var cookie = await LoginAsync();
+
+        using var response = await GetAsync("/api/documents/5/preview?version=7&original=true&format=json", cookie);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("?original=true&version=7", fixture.Paperless.LastRequest!.RequestUri!.Query);
+    }
+
+    [Fact]
+    public async Task Tache_reduite_a_son_etat()
+    {
+        var cookie = await LoginAsync();
+
+        using var done = await GetAsync("/api/taches/3f2504e0-4f89-11d3-9a0c-0305e82c3301", cookie);
+        using var failed = await GetAsync("/api/taches/3f2504e0-4f89-11d3-9a0c-0305e82c3302", cookie);
+        using var unknown = await GetAsync("/api/taches/00000000-0000-0000-0000-000000000001", cookie);
+
+        Assert.Equal("""{"status":"success","message":null,"document_id":12}""", await done.Content.ReadAsStringAsync());
+        var failure = JsonElement.Parse(await failed.Content.ReadAsStringAsync());
+        Assert.Equal("failure", failure.GetProperty("status").GetString());
+        Assert.Contains("duplicate", failure.GetProperty("message").GetString(), StringComparison.Ordinal);
+        Assert.Equal("""{"status":"pending","message":null,"document_id":null}""", await unknown.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Identifiants_de_tous_les_resultats_dans_l_ordre()
+    {
+        var cookie = await LoginAsync();
+
+        using var response = await GetAsync("/api/documents/ids?tags__id__all=1&ordering=-created&page=3&page_size=5&fields=content", cookie);
+
+        Assert.Equal("[7,3,9]", await response.Content.ReadAsStringAsync());
+        var query = LastPaperlessQuery();
+        Assert.Equal("1", query["tags__id__all"]);
+        Assert.Equal("-created", query["ordering"]);
+        Assert.Equal("id", query["fields"]);
+        Assert.Equal("100000", query["page_size"]);
+        Assert.False(query.ContainsKey("page"));
     }
 }

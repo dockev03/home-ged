@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 namespace HomeGed.IntegrationTests;
 
 /// <summary>Base homeged : migrations et stockage des sessions sur un PostgreSQL réel.</summary>
+[Collection(BaseHomeGed.Name)]
 public sealed class SessionStoreIntegrationTests : IAsyncLifetime, IDisposable
 {
     private static readonly DateTimeOffset Now = new(2026, 11, 22, 8, 0, 0, TimeSpan.Zero);

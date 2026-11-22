@@ -26,6 +26,8 @@ public sealed partial class PaperlessRelay(
     /// </summary>
     /// <param name="keepResponse">La réponse est relayée en flux : c'est la requête HTTP qui la libère.</param>
     /// <param name="isFilter">Un 400 signale un filtre invalide (lecture) plutôt qu'une modification refusée.</param>
+    /// <param name="onError">Traduction propre à la route d'un code d'erreur ; null pour la traduction commune.</param>
+    /// <param name="upload">Corps multipart relayé en flux (envoi de fichier) à la place de <paramref name="body"/>.</param>
     public async Task<IResult?> SendAsync(
         HttpContext context,
         HttpMethod method,
@@ -34,14 +36,24 @@ public sealed partial class PaperlessRelay(
         Func<HttpResponseMessage, CancellationToken, Task<IResult?>> onSuccess,
         CancellationToken cancellationToken,
         bool keepResponse = false,
-        bool isFilter = false)
+        bool isFilter = false,
+        Func<HttpStatusCode, IResult?>? onError = null,
+        HttpContent? upload = null)
     {
         var session = context.Features.Get<CurrentSession>()!.Session;
         HttpResponseMessage? response = null;
         try
         {
-            response = await paperless.SendAsync(
-                protector.Unprotect(session.PaperlessToken), method, uri, body, cancellationToken);
+            var token = protector.Unprotect(session.PaperlessToken);
+            response = upload is null
+                ? await paperless.SendAsync(token, method, uri, body, cancellationToken)
+                : await paperless.UploadAsync(token, uri, upload, cancellationToken);
+            if (!response.IsSuccessStatusCode && response.StatusCode != HttpStatusCode.Unauthorized
+                && onError?.Invoke(response.StatusCode) is { } specific)
+            {
+                return specific;
+            }
+
             if (response.IsSuccessStatusCode)
             {
                 var result = await onSuccess(response, cancellationToken);

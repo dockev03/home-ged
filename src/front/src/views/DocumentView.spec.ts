@@ -340,4 +340,21 @@ describe('DocumentView', () => {
     await flushPromises()
     expect(writes(calls)).toEqual([{ method: 'PATCH', path: '/api/documents/5', body: { title: 'Par Entrée' } }])
   })
+
+  it("affiche une ancienne version dans l'aperçu", async () => {
+    stubBff({
+      5: {
+        versions: [
+          { id: 8, added: '2026-11-02T10:00:00Z', version_label: 'Signée', checksum: 'abc', is_root: false },
+          { id: 5, added: '2026-11-01T10:00:00Z', version_label: null, checksum: 'def', is_root: true },
+        ],
+      },
+    })
+    const { wrapper } = await mountView()
+
+    await wrapper.find('#onglet-versions').trigger('click')
+    await wrapper.find('[data-version="5"]').findAll('button').find((b) => b.text() === 'Afficher')!.trigger('click')
+
+    expect(wrapper.find('iframe').attributes('src')).toBe('/api/documents/5/preview?version=5')
+  })
 })

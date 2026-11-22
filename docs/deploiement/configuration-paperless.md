@@ -13,7 +13,9 @@ Puis, dans l'interface : **Mon profil** > **Authentification à deux facteurs** 
 ## 2. Utilisateurs et groupe « Foyer » (G1, G2, G4)
 
 1. **Paramètres** > **Utilisateurs et groupes** > créer le groupe `Foyer`, avec les droits *afficher / ajouter / modifier* sur Documents, Tags, Correspondants, Types de document, Champs personnalisés, Vues sauvegardées et Notes. Pas de suppression ni d'administration.
+   Pour les onglets de la fiche document de Home-GED, ajouter au groupe les droits *afficher* sur **Utilisateurs** et **Groupes** (choisir à qui partager un document, onglet Permissions) et sur **Historique** (journal d'audit, onglet Historique). Sans eux, Home-GED affiche les permissions par numéro et masque l'historique.
 2. Créer un compte par personne (non superutilisateur), membre de `Foyer`. Chacun active ensuite son 2FA.
+3. Chacun règle ses **permissions par défaut** (**Paramètres** > **Permissions**) : groupe `Foyer` en *afficher* et *modifier*. Elles s'appliquent aux étiquettes, correspondants, types et chemins créés à la volée depuis la fiche document de Home-GED, comme dans l'interface Paperless.
 
 Les documents ont un **propriétaire** (celui qui l'importe). Pour qu'un document soit visible par tout le foyer, on lui donne des permissions pour le groupe `Foyer` : c'est automatique avec le workflow du §5.
 

@@ -15,8 +15,11 @@ import { ApiError } from '../api/http'
 import BaseDropdown from '../components/BaseDropdown.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import CustomFieldsEditor from '../components/CustomFieldsEditor.vue'
+import DocumentHistory from '../components/DocumentHistory.vue'
 import DocumentMetadataPanel from '../components/DocumentMetadataPanel.vue'
 import DocumentNotes from '../components/DocumentNotes.vue'
+import DocumentPermissions from '../components/DocumentPermissions.vue'
+import DocumentVersions from '../components/DocumentVersions.vue'
 import ReferenceSelect from '../components/ReferenceSelect.vue'
 import TagPicker from '../components/TagPicker.vue'
 import { MOBILE_QUERY, useMediaQuery } from '../composables/mediaQuery'
@@ -31,12 +34,15 @@ const list = useDocumentListStore()
 const references = useReferencesStore()
 const mobile = useMediaQuery(MOBILE_QUERY)
 
-type Tab = 'details' | 'contenu' | 'metadonnees' | 'notes'
+type Tab = 'details' | 'contenu' | 'metadonnees' | 'notes' | 'historique' | 'permissions' | 'versions'
 const TABS: { value: Tab; label: string }[] = [
   { value: 'details', label: 'Détails' },
   { value: 'contenu', label: 'Contenu' },
   { value: 'metadonnees', label: 'Métadonnées' },
   { value: 'notes', label: 'Notes' },
+  { value: 'historique', label: 'Historique' },
+  { value: 'permissions', label: 'Permissions' },
+  { value: 'versions', label: 'Versions' },
 ]
 
 const id = computed(() => Number(route.params.id))
@@ -49,6 +55,8 @@ const loadError = ref<string | null>(null)
 const saving = ref(false)
 const saveError = ref<string | null>(null)
 const saved = ref(false)
+/** Version affichée dans l'aperçu ; null = la version actuelle. */
+const previewVersion = ref<number | null>(null)
 
 const canEdit = computed(() => doc.value?.user_can_change !== false)
 const dirty = computed(() => !!original.value && !!form.value && isDirty(original.value, form.value))
@@ -72,6 +80,7 @@ async function load() {
   loadError.value = null
   saveError.value = null
   saved.value = false
+  previewVersion.value = null
   try {
     const document = await getDocument(requested)
     if (requested !== id.value) return
@@ -88,6 +97,22 @@ onMounted(() => {
   void references.ensureLoaded()
   void load()
 })
+
+/**
+ * Rechargement après un changement de versions : le document (versions, contenu) est relu, le
+ * formulaire n'est remplacé que s'il n'a pas de modification en cours.
+ */
+async function refresh() {
+  if (!doc.value) return
+  try {
+    const document = await getDocument(doc.value.id)
+    if (document.id !== id.value) return
+    if (dirty.value) doc.value = document
+    else show(document)
+  } catch (e) {
+    saveError.value = errorMessage(e)
+  }
+}
 
 function cancel() {
   if (original.value) form.value = structuredClone(toRaw(original.value))
@@ -233,16 +258,16 @@ const goTo = (target: number | null) => target !== null && router.push({ name: '
       <div class="corps">
         <section class="apercu" aria-label="Aperçu">
           <template v-if="mobile">
-            <a :href="previewUrl(doc.id)" target="_blank" rel="noopener" class="apercu-mobile">
+            <a :href="previewUrl(doc.id, previewVersion)" target="_blank" rel="noopener" class="apercu-mobile">
               <img :src="thumbnailUrl(doc.id)" alt="" />
               <span class="btn btn-outline-primary">Ouvrir l'aperçu</span>
             </a>
           </template>
-          <iframe v-else :key="doc.id" :src="previewUrl(doc.id)" :title="`Aperçu de ${doc.title}`" class="cadre" />
+          <iframe v-else :key="`${doc.id}-${previewVersion}`" :src="previewUrl(doc.id, previewVersion)" :title="`Aperçu de ${doc.title}`" class="cadre" />
         </section>
 
         <section class="onglets">
-          <ul class="nav nav-tabs flex-nowrap mb-3 onglets-liste" role="tablist">
+          <ul class="nav nav-tabs flex-nowrap flex-lg-wrap mb-3 onglets-liste" role="tablist">
             <li v-for="t in TABS" :key="t.value" class="nav-item" role="presentation">
               <button
                 :id="`onglet-${t.value}`"
@@ -295,7 +320,20 @@ const goTo = (target: number | null) => target !== null && router.push({ name: '
 
             <DocumentMetadataPanel v-else-if="tab === 'metadonnees'" :document="doc" />
 
-            <DocumentNotes v-else v-model="notes" :document-id="doc.id" :disabled="!canEdit" />
+            <DocumentNotes v-else-if="tab === 'notes'" v-model="notes" :document-id="doc.id" :disabled="!canEdit" />
+
+            <DocumentHistory v-else-if="tab === 'historique'" :key="`h${doc.id}-${doc.modified}`" :document-id="doc.id" />
+
+            <DocumentPermissions v-else-if="tab === 'permissions'" :key="`p${doc.id}`" :document-id="doc.id" />
+
+            <DocumentVersions
+              v-else
+              :document="doc"
+              :disabled="!canEdit"
+              :shown="previewVersion"
+              @show="previewVersion = $event"
+              @changed="refresh"
+            />
           </div>
         </section>
       </div>
@@ -414,6 +452,12 @@ const goTo = (target: number | null) => target !== null && router.push({ name: '
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
+}
+
+@media (min-width: 992px) {
+  .onglets-liste {
+    overflow: visible;
+  }
 }
 
 .onglets-liste .nav-link {

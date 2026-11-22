@@ -1,4 +1,4 @@
-import { getJson, sendJson } from './http'
+import { ANTI_FORGERY_HEADER, ApiError, getJson, sendJson } from './http'
 
 /** Document tel que renvoyé par la liste Paperless (champs utilisés par Home-GED). */
 export interface DocumentSummary {
@@ -23,13 +23,15 @@ export interface DocumentSummary {
 
 export interface DocumentPage {
   count: number
-  /** Identifiants de tous les documents correspondant aux filtres (sélection « tout », UI-06). */
-  all: number[]
   results: DocumentSummary[]
 }
 
 export const listDocuments = (params: URLSearchParams) =>
   getJson<DocumentPage>(`/api/documents?${params.toString()}`)
+
+/** Identifiants de tous les documents filtrés, dans l'ordre de la liste (précédent / suivant, sélection « tout »). */
+export const listDocumentIds = (params: URLSearchParams) =>
+  getJson<number[]>(`/api/documents/ids?${params.toString()}`)
 
 export const thumbnailUrl = (id: number) => `/api/documents/${id}/thumb`
 
@@ -104,6 +106,16 @@ export interface DocumentDetail extends DocumentSummary {
   original_file_name: string | null
   archived_file_name: string | null
   mime_type: string
+  /** Versions Paperless 3, la plus récente d'abord ; la version d'origine a is_root. */
+  versions?: DocumentVersion[]
+}
+
+export interface DocumentVersion {
+  id: number
+  added: string
+  version_label: string | null
+  checksum: string | null
+  is_root: boolean
 }
 
 /** Champs modifiables depuis la fiche (UI-05). */
@@ -156,10 +168,113 @@ export const addNote = (id: number, note: string) => sendJson<Note[]>('POST', `$
 export const deleteNote = (id: number, noteId: number) =>
   sendJson<Note[]>('DELETE', `${documentPath(id)}/notes/${noteId}`)
 
-export const previewUrl = (id: number) => `${documentPath(id)}/preview`
+function fileQuery(original: boolean, version: number | null) {
+  const params = new URLSearchParams()
+  if (original) params.set('original', 'true')
+  if (version !== null) params.set('version', String(version))
+  const query = params.toString()
+  return query ? `?${query}` : ''
+}
 
-export const downloadUrl = (id: number, original = false) =>
-  `${documentPath(id)}/download${original ? '?original=true' : ''}`
+export const previewUrl = (id: number, version: number | null = null) =>
+  `${documentPath(id)}/preview${fileQuery(false, version)}`
+
+export const downloadUrl = (id: number, original = false, version: number | null = null) =>
+  `${documentPath(id)}/download${fileQuery(original, version)}`
+
+/** Entrée du journal d'audit Paperless (django-auditlog). */
+export interface HistoryEntry {
+  id: number
+  timestamp: string
+  action: string
+  changes: Record<string, unknown> | null
+  actor: { id: number; username: string } | null
+}
+
+export const getHistory = (id: number) => getJson<HistoryEntry[]>(`${documentPath(id)}/history`)
+
+export interface Grantees {
+  users: number[]
+  groups: number[]
+}
+
+export interface DocumentPermissions {
+  owner: number | null
+  permissions: { view: Grantees; change: Grantees }
+}
+
+export const getPermissions = (id: number) => getJson<DocumentPermissions>(`${documentPath(id)}/permissions`)
+
+export const updatePermissions = (id: number, owner: number | null, permissions: DocumentPermissions['permissions']) =>
+  sendJson<DocumentPermissions>('PATCH', `${documentPath(id)}/permissions`, { owner, set_permissions: permissions })
+
+export interface PaperlessUser {
+  id: number
+  username: string
+  first_name?: string
+  last_name?: string
+}
+
+/** Comptes et groupes Paperless : lisibles seulement avec les droits « voir les utilisateurs / groupes ». */
+export const listUsers = () => getJson<PaperlessUser[]>('/api/references/utilisateurs')
+
+export const listGroups = () => getJson<NamedItem[]>('/api/references/groupes')
+
+export const renameVersion = (id: number, versionId: number, label: string) =>
+  sendJson('PATCH', `${documentPath(id)}/versions/${versionId}`, { versionLabel: label })
+
+export const deleteVersion = (id: number, versionId: number) =>
+  sendJson('DELETE', `${documentPath(id)}/versions/${versionId}`)
+
+/** Taille maximale d'un fichier envoyé (alignée sur NPM, Home-GED et Paperless). */
+export const MAX_UPLOAD_BYTES = 200 * 1024 * 1024
+
+/**
+ * Envoie une nouvelle version du document. XMLHttpRequest plutôt que fetch : seul lui donne
+ * l'avancement de l'envoi. Renvoie l'identifiant de la tâche de traitement Paperless.
+ */
+export function uploadVersion(
+  id: number,
+  file: File,
+  label: string,
+  onProgress: (fraction: number) => void = () => {},
+): Promise<string> {
+  const form = new FormData()
+  form.append('document', file, file.name)
+  if (label.trim()) form.append('version_label', label.trim())
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest()
+    request.open('POST', `${documentPath(id)}/versions`)
+    request.withCredentials = true
+    request.setRequestHeader('Accept', 'application/json')
+    for (const [name, value] of Object.entries(ANTI_FORGERY_HEADER)) request.setRequestHeader(name, value)
+    request.upload.onprogress = (event) => {
+      if (event.lengthComputable) onProgress(event.loaded / event.total)
+    }
+    request.onload = () => {
+      let body: { tache?: string; title?: string; code?: string } = {}
+      try {
+        body = JSON.parse(request.responseText || '{}')
+      } catch {
+        // Corps non JSON : message générique.
+      }
+      if (request.status === 202 && body.tache) resolve(body.tache)
+      else reject(new ApiError(request.status, body.title ?? `Envoi refusé (erreur ${request.status}).`, body.code ?? null))
+    }
+    request.onerror = () => reject(new TypeError('réseau'))
+    request.send(form)
+  })
+}
+
+export type TaskStatus = 'pending' | 'started' | 'success' | 'failure' | 'revoked'
+
+export interface TaskState {
+  status: TaskStatus
+  message: string | null
+  document_id: number | null
+}
+
+export const getTask = (taskId: string) => getJson<TaskState>(`/api/taches/${taskId}`)
 
 export type CreatableKind = Exclude<ReferenceKind, 'champs'>
 
