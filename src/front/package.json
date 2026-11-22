@@ -12,7 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "naive-ui": "^2.45.3",
+    "bootstrap": "^5.3.9",
     "pinia": "^4.1.0",
     "vue": "^3.5.44",
     "vue-router": "^5.5.1"

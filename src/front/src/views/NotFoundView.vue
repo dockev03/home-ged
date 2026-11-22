@@ -1,21 +1,18 @@
-<script setup lang="ts">
-import { NButton, NResult } from 'naive-ui'
-</script>
-
 <template>
   <main class="introuvable">
-    <NResult status="404" title="Page introuvable" description="Cette adresse ne correspond à aucune page.">
-      <template #footer>
-        <RouterLink v-slot="{ navigate }" to="/" custom>
-          <NButton type="primary" @click="navigate">Retour à l'accueil</NButton>
-        </RouterLink>
-      </template>
-    </NResult>
+    <p class="display-4 mb-0">404</p>
+    <h1 class="h3">Page introuvable</h1>
+    <p class="text-body-secondary">Cette adresse ne correspond à aucune page.</p>
+    <RouterLink class="btn btn-primary" to="/">Retour à l'accueil</RouterLink>
   </main>
 </template>
 
 <style scoped>
 .introuvable {
-  padding: 2rem 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 3rem 1rem;
+  text-align: center;
 }
 </style>

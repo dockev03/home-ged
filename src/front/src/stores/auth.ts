@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import * as api from '../api/auth'
+import { useReferencesStore } from './references'
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<api.CurrentUser | null>(null)
@@ -38,6 +39,7 @@ export const useAuthStore = defineStore('auth', () => {
   /** Oublie l'utilisateur sans appeler le BFF (session expirée ou révoquée). */
   function clear() {
     user.value = null
+    useReferencesStore().reset()
     loading = Promise.resolve()
   }
 

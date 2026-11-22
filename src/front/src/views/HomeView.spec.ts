@@ -9,6 +9,7 @@ function mountHome() {
     history: createMemoryHistory(),
     routes: [
       { path: '/', component: HomeView },
+      { path: '/documents', name: 'documents', component: { template: '<p />' } },
     ],
   })
   return mount(HomeView, { global: { plugins: [router] } })
@@ -24,8 +25,8 @@ describe('HomeView', () => {
     const wrapper = mountHome()
     await flushPromises()
 
-    expect(wrapper.text()).toContain('Home-GED')
-    expect(wrapper.text()).toContain('Version 1.2.3')
+    expect(wrapper.text()).toContain('Tableau de bord')
+    expect(wrapper.text()).toContain('version 1.2.3')
   })
 
   it("reste utilisable si le BFF ne répond pas", async () => {
@@ -34,7 +35,7 @@ describe('HomeView', () => {
     const wrapper = mountHome()
     await flushPromises()
 
-    expect(wrapper.text()).toContain('Home-GED')
-    expect(wrapper.text()).not.toContain('Version')
+    expect(wrapper.text()).toContain('Tableau de bord')
+    expect(wrapper.text()).not.toContain('version')
   })
 })

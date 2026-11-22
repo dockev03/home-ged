@@ -4,6 +4,7 @@ import App from './App.vue'
 import { onUnauthorized } from './api/http'
 import { loginRoute, router } from './router'
 import { useAuthStore } from './stores/auth'
+import 'bootstrap/dist/css/bootstrap.min.css'
 import './styles.css'
 
 const pinia = createPinia()

@@ -4,14 +4,14 @@ namespace HomeGed.Api.Hosting;
 public static class SecurityHeaders
 {
     /// <summary>
-    /// CSP : tout vient de l'application elle-même. `style-src 'unsafe-inline'` est requis
-    /// par Naive UI, qui injecte les styles de ses composants à l'exécution (CSS-in-JS).
+    /// CSP : tout vient de l'application elle-même, styles compris (feuilles Bootstrap et Vite ;
+    /// les liaisons :style de Vue passent par le CSSOM, que la CSP n'interdit pas).
     /// `blob:` permet l'aperçu des documents téléchargés par le BFF.
     /// </summary>
     public const string ContentSecurityPolicy =
         "default-src 'self'; " +
         "script-src 'self'; " +
-        "style-src 'self' 'unsafe-inline'; " +
+        "style-src 'self'; " +
         "img-src 'self' data: blob:; " +
         "font-src 'self' data:; " +
         "connect-src 'self'; " +

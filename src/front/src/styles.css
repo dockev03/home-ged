@@ -1,4 +1,4 @@
-/* Styles globaux minimaux : le reste vient de Naive UI et des composants. */
+/* Styles globaux : Bootstrap 5 fournit la base, chaque composant ses propres styles. */
 :root {
   -webkit-text-size-adjust: 100%;
 }
@@ -6,13 +6,39 @@
 html,
 body,
 #app {
-  margin: 0;
   min-height: 100%;
 }
 
 body {
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   /* Zones sûres des écrans à encoche (PWA plein écran). */
   padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
     env(safe-area-inset-left);
+}
+
+/* Écrans tactiles : cibles d'au moins 44 px (§4 Accessibilité). */
+@media (pointer: coarse) {
+  .btn,
+  .nav-link,
+  .dropdown-item,
+  .page-link,
+  .form-control,
+  .form-select {
+    min-height: 44px;
+  }
+
+  .btn,
+  .nav-link,
+  .page-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .nav-link,
+  .dropdown-item {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 0.5rem;
+  }
 }

@@ -1,18 +1,24 @@
 import type { ThemeChoice } from '../stores/preferences'
 
-/** Couleurs de la barre d'état mobile (identiques aux balises theme-color d'index.html). */
-export const THEME_COLORS = { light: '#f7f7f8', dark: '#18181c' } as const
+/** Couleurs de la barre d'état mobile = fond de la barre du haut (bg-body-tertiary de Bootstrap). */
+export const THEME_COLORS = { light: '#f8f9fa', dark: '#2b3035' } as const
+
+/** Thème réellement affiché : le choix de l'utilisateur, ou celui du système. */
+export function isDark(choice: ThemeChoice, systemDark: boolean): boolean {
+  return choice === 'systeme' ? systemDark : choice === 'sombre'
+}
 
 /**
- * Aligne le navigateur sur le thème affiché : color-scheme (barres de défilement, champs natifs)
- * et theme-color (barre d'état). Les deux balises theme-color d'index.html, une par schéma système,
- * reçoivent la même couleur quand le thème est imposé.
+ * Aligne la page sur le thème affiché : data-bs-theme (Bootstrap), color-scheme (barres de
+ * défilement, champs natifs) et theme-color (barre d'état). Les deux balises theme-color
+ * d'index.html, une par schéma système, reçoivent la même couleur quand le thème est imposé.
  */
-export function applyBrowserTheme(choice: ThemeChoice, doc: Document = document) {
-  doc.documentElement.style.colorScheme = choice === 'systeme' ? '' : choice === 'sombre' ? 'dark' : 'light'
+export function applyBrowserTheme(choice: ThemeChoice, systemDark: boolean, doc: Document = document) {
+  const root = doc.documentElement
+  root.dataset.bsTheme = isDark(choice, systemDark) ? 'dark' : 'light'
+  root.style.colorScheme = choice === 'systeme' ? '' : choice === 'sombre' ? 'dark' : 'light'
   for (const meta of doc.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')) {
-    const systemDark = (meta.getAttribute('media') ?? '').includes('dark')
-    const dark = choice === 'systeme' ? systemDark : choice === 'sombre'
-    meta.content = dark ? THEME_COLORS.dark : THEME_COLORS.light
+    const systemDarkMeta = (meta.getAttribute('media') ?? '').includes('dark')
+    meta.content = isDark(choice, systemDarkMeta) ? THEME_COLORS.dark : THEME_COLORS.light
   }
 }

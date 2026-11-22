@@ -134,6 +134,17 @@ public sealed partial class PaperlessClient(HttpClient http, ILogger<PaperlessCl
             : throw new HttpRequestException("Réponse de Paperless sans utilisateur.");
     }
 
+    /// <summary>
+    /// GET authentifié par le token de l'utilisateur : les droits sont appliqués par Paperless.
+    /// La réponse est rendue dès les en-têtes reçus (flux) ; l'appelant la libère.
+    /// </summary>
+    public async Task<HttpResponseMessage> GetAsync(string token, string relativeUri, CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(relativeUri, UriKind.Relative));
+        request.Headers.Authorization = new AuthenticationHeaderValue("Token", token);
+        return await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+    }
+
     /// <summary>Messages de Paperless 3.5 (sans Accept-Language, ils restent en anglais).</summary>
     internal const string MfaRequiredMessage = "MFA code is required";
 
