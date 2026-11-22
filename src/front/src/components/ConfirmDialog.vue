@@ -9,6 +9,8 @@ const props = defineProps<{
   cancelLabel?: string
   danger?: boolean
   busy?: boolean
+  /** Confirmation impossible tant que le formulaire est incomplet. */
+  disabled?: boolean
 }>()
 const emit = defineEmits<{ confirm: []; cancel: [] }>()
 const cancelButton = useTemplateRef<HTMLButtonElement>('cancelButton')
@@ -35,7 +37,7 @@ watch(
       @keydown.esc="emit('cancel')"
       @click.self="emit('cancel')"
     >
-      <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
         <div class="modal-content">
           <div class="modal-header">
             <h2 id="confirmation-titre" class="modal-title fs-5">{{ title }}</h2>
@@ -49,7 +51,7 @@ watch(
               type="button"
               class="btn"
               :class="danger ? 'btn-danger' : 'btn-primary'"
-              :disabled="busy"
+              :disabled="busy || disabled"
               @click="emit('confirm')"
             >
               <span v-if="busy" class="spinner-border spinner-border-sm me-1" aria-hidden="true" />

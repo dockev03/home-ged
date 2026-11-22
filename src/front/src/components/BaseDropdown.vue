@@ -14,6 +14,8 @@ const props = defineProps<{
   ariaLabel?: string
   /** Rôle du menu : « menu » pour des actions, « dialog » pour un formulaire de filtre. */
   menuRole?: 'menu' | 'dialog'
+  /** Menu ouvert au-dessus du bouton (barre collée en bas de l'écran). */
+  up?: boolean
 }>()
 
 const open = ref(false)
@@ -40,7 +42,7 @@ defineExpose({ close })
 </script>
 
 <template>
-  <div ref="root" class="dropdown" @keydown.esc.stop="close(true)">
+  <div ref="root" :class="props.up ? 'dropup' : 'dropdown'" @keydown.esc.stop="close(true)">
     <button
       ref="toggleButton"
       type="button"

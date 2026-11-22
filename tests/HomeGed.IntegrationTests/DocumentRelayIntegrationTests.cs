@@ -297,4 +297,111 @@ public sealed class DocumentRelayIntegrationTests(HomeGedAppFixture app) : IClas
         Assert.Equal(HttpStatusCode.NoContent, deleted.StatusCode);
         Assert.Equal(1, (await app.GetJsonAsync($"/api/documents/{app.DocumentId}")).GetProperty("versions").GetArrayLength());
     }
+
+    [Fact]
+    public async Task Actions_en_masse_et_telechargement_groupe()
+    {
+        using var created = await app.SendAsync(HttpMethod.Post, "/api/references/tags", new { name = "Masse " + app.Marker, color = "#33a02c" });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var tag = JsonElement.Parse(await created.Content.ReadAsStringAsync()).GetProperty("id").GetInt32();
+
+        using var added = await app.SendAsync(HttpMethod.Post, "/api/documents/actions", new
+        {
+            documents = new[] { app.DocumentId },
+            method = "modify_tags",
+            parameters = new { add_tags = new[] { tag }, remove_tags = Array.Empty<int>() },
+        });
+        var addedBody = await WaitForBulkAsync(added);
+        await EventuallyAsync(async () => (await TagsAsync()).Contains(tag), "étiquette ajoutée", addedBody);
+
+        using var removed = await app.SendAsync(HttpMethod.Post, "/api/documents/actions", new
+        {
+            documents = new[] { app.DocumentId },
+            method = "modify_tags",
+            parameters = new { add_tags = Array.Empty<int>(), remove_tags = new[] { tag } },
+        });
+        var removedBody = await WaitForBulkAsync(removed);
+        await EventuallyAsync(async () => !(await TagsAsync()).Contains(tag), "étiquette retirée", removedBody);
+
+        using var correspondent = await app.SendAsync(HttpMethod.Post, "/api/documents/actions", new
+        {
+            documents = new[] { app.DocumentId },
+            method = "set_correspondent",
+            parameters = new { correspondent = (int?)null },
+        });
+        await WaitForBulkAsync(correspondent);
+
+        using var permissions = await app.SendAsync(HttpMethod.Post, "/api/documents/actions", new
+        {
+            documents = new[] { app.DocumentId },
+            method = "set_permissions",
+            parameters = new
+            {
+                owner = app.UserId,
+                merge = true,
+                set_permissions = new
+                {
+                    view = new { users = Array.Empty<int>(), groups = Array.Empty<int>() },
+                    change = new { users = Array.Empty<int>(), groups = Array.Empty<int>() },
+                },
+            },
+        });
+        await WaitForBulkAsync(permissions);
+
+        using var zip = await app.SendAsync(HttpMethod.Post, "/api/documents/telechargement", new { documents = new[] { app.DocumentId }, contenu = "originaux" });
+        Assert.Equal(HttpStatusCode.OK, zip.StatusCode);
+        Assert.Equal("application/zip", zip.Content.Headers.ContentType!.MediaType);
+        Assert.Equal("PK"u8.ToArray(), (await zip.Content.ReadAsByteArrayAsync())[..2]);
+    }
+
+    private async Task<int[]> TagsAsync() =>
+        [.. (await app.GetJsonAsync($"/api/documents/{app.DocumentId}")).GetProperty("tags").EnumerateArray().Select(t => t.GetInt32())];
+
+    /// <summary>
+    /// Action acceptée : 204, ou 202 et sa tâche de fond, suivie par <c>/api/taches</c> jusqu'à son
+    /// succès. Rend la réponse reçue, pour les messages d'échec.
+    /// </summary>
+    private async Task<string> WaitForBulkAsync(HttpResponseMessage response)
+    {
+        var body = await response.Content.ReadAsStringAsync();
+        var description = $"HTTP {(int)response.StatusCode} {body}";
+        Assert.True(response.StatusCode is HttpStatusCode.NoContent or HttpStatusCode.Accepted, description);
+        if (response.StatusCode == HttpStatusCode.NoContent)
+        {
+            return description;
+        }
+
+        var task = JsonElement.Parse(body).GetProperty("tache").GetGuid();
+        for (var attempt = 0; attempt < 60; attempt++)
+        {
+            var state = await app.GetJsonAsync($"/api/taches/{task:D}");
+            var status = state.GetProperty("status").GetString();
+            if (status == "success")
+            {
+                return description;
+            }
+
+            Assert.True(status is "pending" or "started", $"Tâche {task} : {status} ({state.GetProperty("message")})");
+            await Task.Delay(500);
+        }
+
+        Assert.Fail($"La tâche {task} n'est pas terminée après 30 s.");
+        return description;
+    }
+
+    /// <summary>L'action en masse peut finir juste après la tâche : quelques relectures du document.</summary>
+    private static async Task EventuallyAsync(Func<Task<bool>> condition, string what, string bulkResponse)
+    {
+        for (var attempt = 0; attempt < 20; attempt++)
+        {
+            if (await condition())
+            {
+                return;
+            }
+
+            await Task.Delay(500);
+        }
+
+        Assert.Fail($"{what} : non constaté après 10 s (réponse de l'action : {bulkResponse}).");
+    }
 }

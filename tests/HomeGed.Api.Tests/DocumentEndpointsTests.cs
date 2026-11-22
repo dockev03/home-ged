@@ -35,6 +35,21 @@ internal static class FakePaperlessDocuments
         var fullPerms = query.ContainsKey("full_perms");
         switch (path)
         {
+            case "/api/documents/bulk_edit/" when token == "tok-bob":
+                return FakePaperless.Json(HttpStatusCode.Forbidden, """{"detail":"Insufficient permissions"}""");
+
+            case "/api/documents/bulk_edit/" when body!.Contains("\"documents\":[9]", StringComparison.Ordinal):
+                return FakePaperless.Json(HttpStatusCode.OK, """{"result":"OK","task_id":"3f2504e0-4f89-11d3-9a0c-0305e82c3309"}""");
+
+            case "/api/documents/bulk_edit/":
+                return FakePaperless.Json(HttpStatusCode.OK, """{"result":"OK"}""");
+
+            case "/api/documents/bulk_download/":
+                var zip = new ByteArrayContent([80, 75, 3, 4]);
+                zip.Headers.ContentType = new("application/zip");
+                zip.Headers.ContentDisposition = new("attachment") { FileName = "documents.zip" };
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = zip };
+
             case "/api/documents/5/" when fullPerms && method == "PATCH" && token == "tok-bob":
                 return FakePaperless.Json(HttpStatusCode.Forbidden, """{"detail":"Insufficient permissions."}""");
 
@@ -876,4 +891,164 @@ public sealed class DocumentEndpointsTests(AuthAppFixture fixture) : IClassFixtu
         Assert.Equal("100000", query["page_size"]);
         Assert.False(query.ContainsKey("page"));
     }
+
+    [Fact]
+    public async Task Action_en_masse_transmet_le_corps_normalise_a_bulk_edit()
+    {
+        var cookie = await LoginAsync();
+
+        using var response = await SendAsync(HttpMethod.Post, "/api/documents/actions", cookie, """
+            {"documents":[5,7,5],"method":"modify_tags","parameters":{"add_tags":[3],"remove_tags":[1,1]}}
+            """);
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Equal("/api/documents/bulk_edit/", fixture.Paperless.LastRequest!.RequestUri!.AbsolutePath);
+        Assert.Equal("Token tok-alice", fixture.Paperless.LastRequest.Headers.Authorization!.ToString());
+        var sent = LastPaperlessBody();
+        Assert.Equal("[5,7]", sent.GetProperty("documents").GetRawText());
+        Assert.Equal("modify_tags", sent.GetProperty("method").GetString());
+        Assert.Equal("""{"add_tags":[3],"remove_tags":[1]}""", sent.GetProperty("parameters").GetRawText());
+    }
+
+    [Fact]
+    public async Task Action_en_masse_champs_personnalises_au_format_Paperless()
+    {
+        var cookie = await LoginAsync();
+
+        using var response = await SendAsync(HttpMethod.Post, "/api/documents/actions", cookie, """
+            {"documents":[5],"method":"modify_custom_fields",
+             "parameters":{"add_custom_fields":[{"field":2,"value":"EUR12.50"},{"field":4,"value":null}],"remove_custom_fields":[6]}}
+            """);
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Equal(
+            """{"add_custom_fields":{"2":"EUR12.50","4":null},"remove_custom_fields":[6]}""",
+            LastPaperlessBody().GetProperty("parameters").GetRawText());
+    }
+
+    [Fact]
+    public async Task Action_en_masse_permissions_avec_fusion()
+    {
+        var cookie = await LoginAsync();
+
+        using var response = await SendAsync(HttpMethod.Post, "/api/documents/actions", cookie, """
+            {"documents":[5],"method":"set_permissions",
+             "parameters":{"owner":null,"merge":true,"set_permissions":{"view":{"users":[2],"groups":[]},"change":{"users":[],"groups":[1]}}}}
+            """);
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        var parameters = LastPaperlessBody().GetProperty("parameters");
+        Assert.True(parameters.GetProperty("merge").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, parameters.GetProperty("owner").ValueKind);
+        Assert.Equal("[1]", parameters.GetProperty("set_permissions").GetProperty("change").GetProperty("groups").GetRawText());
+    }
+
+    [Theory]
+    [InlineData("""{"documents":[],"method":"delete"}""")]
+    [InlineData("""{"documents":[5],"method":"reprocess"}""")]
+    [InlineData("""{"documents":[5],"method":"merge","parameters":{}}""")]
+    [InlineData("""{"documents":[5],"method":"delete","parameters":{"x":1}}""")]
+    [InlineData("""{"documents":["5"],"method":"delete"}""")]
+    [InlineData("""{"documents":[5],"method":"modify_tags","parameters":{}}""")]
+    [InlineData("""{"documents":[5],"method":"modify_tags","parameters":{"add_tags":[0]}}""")]
+    [InlineData("""{"documents":[5],"method":"set_correspondent","parameters":{"correspondent":"EDF"}}""")]
+    [InlineData("""{"documents":[5],"method":"set_document_type","parameters":{"document_type":2,"title":"x"}}""")]
+    [InlineData("""{"documents":[5],"method":"modify_custom_fields","parameters":{"add_custom_fields":[{"field":2,"value":{"a":1}}]}}""")]
+    [InlineData("""{"documents":[5],"method":"set_permissions","parameters":{"merge":"oui","set_permissions":{"view":{},"change":{}}}}""")]
+    [InlineData("""{"documents":[5],"method":"delete","user":1}""")]
+    public async Task Action_en_masse_invalide_refusee_sans_appeler_Paperless(string body)
+    {
+        var cookie = await LoginAsync();
+        var calls = fixture.Paperless.Calls;
+
+        using var response = await SendAsync(HttpMethod.Post, "/api/documents/actions", cookie, body);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("requete_invalide", await ErrorCodeAsync(response));
+        Assert.Equal(calls, fixture.Paperless.Calls);
+    }
+
+    [Fact]
+    public async Task Action_en_masse_refusee_par_Paperless_donne_403_explicite()
+    {
+        var cookie = await LoginAsync("bob", "123456");
+
+        using var response = await SendAsync(HttpMethod.Post, "/api/documents/actions", cookie, """
+            {"documents":[5],"method":"delete"}
+            """);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal("acces_refuse", await ErrorCodeAsync(response));
+    }
+
+    [Fact]
+    public async Task Action_en_masse_sans_en_tete_anti_CSRF_refusee()
+    {
+        var cookie = await LoginAsync();
+        var calls = fixture.Paperless.Calls;
+
+        using var response = await SendAsync(
+            HttpMethod.Post, "/api/documents/actions", cookie, """{"documents":[5],"method":"delete"}""", antiForgery: false);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal(calls, fixture.Paperless.Calls);
+    }
+
+    [Fact]
+    public async Task Telechargement_en_masse_relaye_l_archive_en_flux()
+    {
+        var cookie = await LoginAsync();
+
+        using var response = await SendAsync(HttpMethod.Post, "/api/documents/telechargement", cookie, """
+            {"documents":[5,7],"contenu":"originaux"}
+            """);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("application/zip", response.Content.Headers.ContentType!.MediaType);
+        Assert.Equal("documents.zip", response.Content.Headers.ContentDisposition!.FileName);
+        Assert.Equal([80, 75, 3, 4], await response.Content.ReadAsByteArrayAsync());
+        var sent = LastPaperlessBody();
+        Assert.Equal("/api/documents/bulk_download/", fixture.Paperless.LastRequest!.RequestUri!.AbsolutePath);
+        Assert.Equal("originals", sent.GetProperty("content").GetString());
+        Assert.Equal("[5,7]", sent.GetProperty("documents").GetRawText());
+    }
+
+    [Theory]
+    [InlineData("""{"documents":[5],"contenu":"tout"}""")]
+    [InlineData("""{"documents":[]}""")]
+    [InlineData("""{"documents":[5],"compression":"lzma"}""")]
+    public async Task Telechargement_en_masse_invalide_refuse(string body)
+    {
+        var cookie = await LoginAsync();
+        var calls = fixture.Paperless.Calls;
+
+        using var response = await SendAsync(HttpMethod.Post, "/api/documents/telechargement", cookie, body);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(calls, fixture.Paperless.Calls);
+    }
+
+    [Fact]
+    public async Task Action_en_masse_en_tache_de_fond_renvoie_la_tache()
+    {
+        var cookie = await LoginAsync();
+
+        using var response = await SendAsync(HttpMethod.Post, "/api/documents/actions", cookie, """
+            {"documents":[9],"method":"delete"}
+            """);
+
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+        var body = JsonElement.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(Guid.Parse("3f2504e0-4f89-11d3-9a0c-0305e82c3309"), body.GetProperty("tache").GetGuid());
+    }
+
+    [Theory]
+    [InlineData("\"3f2504e0-4f89-11d3-9a0c-0305e82c3309\"", true)]
+    [InlineData("""{"task_id":"3f2504e0-4f89-11d3-9a0c-0305e82c3309"}""", true)]
+    [InlineData("""{"result":"OK"}""", false)]
+    [InlineData("""{"task_id":"pas-un-guid"}""", false)]
+    [InlineData("OK", false)]
+    [InlineData("", false)]
+    public void Tache_d_action_en_masse_lue_dans_les_deux_formats(string body, bool found) =>
+        Assert.Equal(found, DocumentEndpoints.BulkTask(body).HasValue);
 }
