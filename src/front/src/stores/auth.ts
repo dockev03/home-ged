@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import * as api from '../api/auth'
 import { useReferencesStore } from './references'
+import { useUploadsStore } from './uploads'
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<api.CurrentUser | null>(null)
@@ -40,6 +41,7 @@ export const useAuthStore = defineStore('auth', () => {
   function clear() {
     user.value = null
     useReferencesStore().reset()
+    useUploadsStore().reset()
     loading = Promise.resolve()
   }
 

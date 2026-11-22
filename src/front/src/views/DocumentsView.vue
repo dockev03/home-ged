@@ -6,6 +6,7 @@ import { ApiError } from '../api/http'
 import BulkActions from '../components/BulkActions.vue'
 import FilterBar from '../components/FilterBar.vue'
 import TagBadge from '../components/TagBadge.vue'
+import UploadButton from '../components/UploadButton.vue'
 import { MOBILE_QUERY, useMediaQuery } from '../composables/mediaQuery'
 import { fromQuery, toApiParams, toQuery, type DocumentFilters } from '../filters/documentFilters'
 import { formatShortDate } from '../format/dates'
@@ -14,6 +15,7 @@ import { useAuthStore } from '../stores/auth'
 import { useDocumentListStore } from '../stores/documentList'
 import { usePreferencesStore, type DisplayChoice } from '../stores/preferences'
 import { useReferencesStore } from '../stores/references'
+import { useUploadsStore } from '../stores/uploads'
 
 /**
  * Liste des documents (UI-02) : vignettes, détails ou tableau ; filtres dans l'URL (UI-03) ;
@@ -149,6 +151,16 @@ async function selectAll() {
   selected.value = list.ids.length ? [...list.ids] : selected.value
 }
 
+// Un document ajouté par l'utilisateur apparaît dans la liste dès que Paperless l'a traité.
+const uploads = useUploadsStore()
+watch(
+  () => uploads.added,
+  () => {
+    reload()
+    void loadIds()
+  },
+)
+
 function applied(message: string, modified: boolean) {
   notice.value = message
   if (!modified) return
@@ -201,7 +213,8 @@ onMounted(() => {
 <template>
   <div class="documents">
     <div class="entete">
-      <h1 class="h3 mb-0">Documents</h1>
+      <h1 class="h3 mb-0 me-auto">Documents</h1>
+      <UploadButton button-class="btn btn-sm btn-primary" />
       <div class="btn-group" role="group" aria-label="Affichage">
         <button
           v-for="display in DISPLAYS"

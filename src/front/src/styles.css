@@ -41,4 +41,10 @@ body {
     justify-content: flex-start;
     gap: 0.5rem;
   }
+
+  /* Croix de fermeture : icône inchangée, zone tactile agrandie (sauf dans les badges). */
+  .btn-close:not(.badge .btn-close) {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }
