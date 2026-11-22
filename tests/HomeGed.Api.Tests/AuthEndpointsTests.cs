@@ -130,7 +130,9 @@ internal static class FakePaperless
             };
         }
 
-        return FakePaperlessDocuments.Respond(request, body) ?? new HttpResponseMessage(HttpStatusCode.NotFound);
+        return FakePaperlessManage.Respond(request, body)
+            ?? FakePaperlessDocuments.Respond(request, body)
+            ?? new HttpResponseMessage(HttpStatusCode.NotFound);
     }
 
     internal static HttpResponseMessage Json(HttpStatusCode status, string json) =>

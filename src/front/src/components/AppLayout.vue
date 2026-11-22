@@ -2,6 +2,7 @@
 import { nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { MOBILE_QUERY, useMediaQuery } from '../composables/mediaQuery'
+import { KINDS } from '../gestion/kinds'
 import { useUploadsStore } from '../stores/uploads'
 import UploadPanel from './UploadPanel.vue'
 import UserMenu from './UserMenu.vue'
@@ -15,7 +16,7 @@ const route = useRoute()
 const router = useRouter()
 
 /** Entrées du menu ; celles sans route arrivent aux étapes suivantes. */
-const SECTIONS: { title?: string; items: { label: string; to?: string }[] }[] = [
+const SECTIONS: { title?: string; items: { label: string; to?: string; params?: Record<string, string> }[] }[] = [
   {
     items: [
       { label: 'Tableau de bord', to: 'accueil' },
@@ -25,11 +26,7 @@ const SECTIONS: { title?: string; items: { label: string; to?: string }[] }[] = 
   {
     title: 'Gérer',
     items: [
-      { label: 'Étiquettes' },
-      { label: 'Correspondants' },
-      { label: 'Types de documents' },
-      { label: 'Chemins de stockage' },
-      { label: 'Champs personnalisés' },
+      ...KINDS.map((k) => ({ label: k.title, to: 'gerer', params: { type: k.slug } })),
     ],
   },
   {
@@ -169,7 +166,7 @@ onBeforeUnmount(() => document.body.classList.remove('overflow-hidden'))
                 :active-class="item.to === 'accueil' ? '' : 'active'"
                 exact-active-class="active"
                 :class="{ active: item.to === 'documents' && route.name === 'document' }"
-                :to="{ name: item.to }"
+                :to="{ name: item.to, params: item.params }"
               >
                 {{ item.label }}
               </RouterLink>
