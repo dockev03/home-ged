@@ -1,0 +1,491 @@
+<script setup lang="ts">
+import { computed, onBeforeUnmount, onMounted, ref, toRaw, watch } from 'vue'
+import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter, type RouteLocationRaw } from 'vue-router'
+import {
+  deleteDocument,
+  downloadUrl,
+  getDocument,
+  previewUrl,
+  thumbnailUrl,
+  updateDocument,
+  type DocumentDetail,
+  type Note,
+} from '../api/documents'
+import { ApiError } from '../api/http'
+import BaseDropdown from '../components/BaseDropdown.vue'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
+import CustomFieldsEditor from '../components/CustomFieldsEditor.vue'
+import DocumentMetadataPanel from '../components/DocumentMetadataPanel.vue'
+import DocumentNotes from '../components/DocumentNotes.vue'
+import ReferenceSelect from '../components/ReferenceSelect.vue'
+import TagPicker from '../components/TagPicker.vue'
+import { MOBILE_QUERY, useMediaQuery } from '../composables/mediaQuery'
+import { diff, isDirty, toForm, validate, type DocumentForm } from '../documents/form'
+import { useDocumentListStore } from '../stores/documentList'
+import { useReferencesStore } from '../stores/references'
+
+/** Fiche document (UI-04) et modification de ses détails (UI-05). */
+const route = useRoute()
+const router = useRouter()
+const list = useDocumentListStore()
+const references = useReferencesStore()
+const mobile = useMediaQuery(MOBILE_QUERY)
+
+type Tab = 'details' | 'contenu' | 'metadonnees' | 'notes'
+const TABS: { value: Tab; label: string }[] = [
+  { value: 'details', label: 'Détails' },
+  { value: 'contenu', label: 'Contenu' },
+  { value: 'metadonnees', label: 'Métadonnées' },
+  { value: 'notes', label: 'Notes' },
+]
+
+const id = computed(() => Number(route.params.id))
+const doc = ref<DocumentDetail | null>(null)
+const original = ref<DocumentForm | null>(null)
+const form = ref<DocumentForm | null>(null)
+const notes = ref<Note[]>([])
+const tab = ref<Tab>('details')
+const loadError = ref<string | null>(null)
+const saving = ref(false)
+const saveError = ref<string | null>(null)
+const saved = ref(false)
+
+const canEdit = computed(() => doc.value?.user_can_change !== false)
+const dirty = computed(() => !!original.value && !!form.value && isDirty(original.value, form.value))
+const neighbours = computed(() => list.neighbours(id.value))
+const listRoute = computed<RouteLocationRaw>(() => ({ name: 'documents', query: list.query }))
+
+const errorMessage = (e: unknown) =>
+  e instanceof ApiError ? e.message : 'Impossible de joindre Home-GED. Vérifiez votre connexion.'
+
+function show(document: DocumentDetail) {
+  doc.value = document
+  original.value = toForm(document)
+  form.value = toForm(document)
+}
+
+async function load() {
+  const requested = id.value
+  doc.value = null
+  form.value = null
+  original.value = null
+  loadError.value = null
+  saveError.value = null
+  saved.value = false
+  try {
+    const document = await getDocument(requested)
+    if (requested !== id.value) return
+    show(document)
+    notes.value = document.notes ?? []
+  } catch (e) {
+    if (requested !== id.value) return
+    loadError.value = e instanceof ApiError && e.status === 404 ? 'Ce document n’existe pas ou ne vous est pas accessible.' : errorMessage(e)
+  }
+}
+
+watch(id, load)
+onMounted(() => {
+  void references.ensureLoaded()
+  void load()
+})
+
+function cancel() {
+  if (original.value) form.value = structuredClone(toRaw(original.value))
+  saveError.value = null
+}
+
+async function save(close: boolean) {
+  if (!doc.value || !form.value || !original.value || saving.value) return
+  saveError.value = validate(form.value)
+  saved.value = false
+  if (saveError.value) return
+  const update = diff(original.value, form.value)
+  saving.value = true
+  try {
+    if (Object.keys(update).length > 0) show(await updateDocument(doc.value.id, update))
+    if (close) await leave(listRoute.value)
+    else saved.value = true
+  } catch (e) {
+    saveError.value = errorMessage(e)
+  } finally {
+    saving.value = false
+  }
+}
+
+// Modifications non enregistrées : confirmation avant de quitter la fiche ou de changer de document.
+const pendingLeave = ref<RouteLocationRaw | null>(null)
+let bypassGuard = false
+
+async function leave(target: RouteLocationRaw) {
+  bypassGuard = true
+  try {
+    await router.push(target)
+  } finally {
+    bypassGuard = false
+  }
+}
+
+function guard(to: RouteLocationRaw) {
+  if (bypassGuard || !dirty.value) return true
+  pendingLeave.value = to
+  return false
+}
+onBeforeRouteLeave((to) => guard(to.fullPath))
+onBeforeRouteUpdate((to) => guard(to.fullPath))
+
+async function confirmLeave() {
+  const target = pendingLeave.value
+  pendingLeave.value = null
+  if (target) await leave(target)
+}
+
+function onBeforeUnload(event: BeforeUnloadEvent) {
+  if (dirty.value) event.preventDefault()
+}
+window.addEventListener('beforeunload', onBeforeUnload)
+onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload))
+
+// Suppression : Paperless place le document dans sa corbeille.
+const confirmingDelete = ref(false)
+const deleting = ref(false)
+
+async function remove() {
+  if (!doc.value) return
+  deleting.value = true
+  try {
+    await deleteDocument(doc.value.id)
+    list.forget(doc.value.id)
+    confirmingDelete.value = false
+    await leave(listRoute.value)
+  } catch (e) {
+    confirmingDelete.value = false
+    saveError.value = errorMessage(e)
+  } finally {
+    deleting.value = false
+  }
+}
+
+/** Entrée dans un champ de saisie des détails : enregistre (sauf dans un formulaire de création « + »). */
+function onEnter(event: KeyboardEvent) {
+  const target = event.target
+  if (!(target instanceof HTMLInputElement) || target.type === 'checkbox' || target.closest('form')) return
+  event.preventDefault()
+  void save(false)
+}
+
+const goTo = (target: number | null) => target !== null && router.push({ name: 'document', params: { id: target } })
+</script>
+
+<template>
+  <div class="fiche">
+    <div v-if="loadError" class="alert alert-danger d-flex flex-wrap align-items-center gap-2" role="alert">
+      <span class="me-auto">{{ loadError }}</span>
+      <button type="button" class="btn btn-sm btn-outline-danger" @click="load">Réessayer</button>
+      <RouterLink :to="listRoute" class="btn btn-sm btn-outline-secondary">Retour à la liste</RouterLink>
+    </div>
+
+    <template v-else-if="doc && form">
+      <header class="entete">
+        <RouterLink :to="listRoute" class="retour">← Documents</RouterLink>
+        <h1 class="h4 mb-0 titre">
+          {{ doc.title }} <small class="text-body-secondary fw-normal">n° {{ doc.id }}</small>
+        </h1>
+        <div class="outils">
+          <div v-if="neighbours.position" class="btn-group" role="group" aria-label="Navigation dans la liste">
+            <button
+              type="button"
+              class="btn btn-outline-secondary"
+              :disabled="neighbours.previous === null"
+              aria-label="Document précédent"
+              @click="goTo(neighbours.previous)"
+            >
+              ‹
+            </button>
+            <span class="btn btn-outline-secondary disabled position">
+              {{ neighbours.position.index }} / {{ neighbours.position.total }}
+            </span>
+            <button
+              type="button"
+              class="btn btn-outline-secondary"
+              :disabled="neighbours.next === null"
+              aria-label="Document suivant"
+              @click="goTo(neighbours.next)"
+            >
+              ›
+            </button>
+          </div>
+          <BaseDropdown end button-class="btn btn-outline-secondary">
+            <template #toggle>Télécharger</template>
+            <a v-if="doc.archived_file_name" class="dropdown-item" role="menuitem" :href="downloadUrl(doc.id)" download>
+              Version archivée (PDF/A)
+            </a>
+            <a class="dropdown-item" role="menuitem" :href="downloadUrl(doc.id, true)" download>Fichier original</a>
+          </BaseDropdown>
+          <button type="button" class="btn btn-outline-secondary" disabled title="Liens de partage protégés : lot 3">
+            Envoyer
+          </button>
+          <button v-if="canEdit" type="button" class="btn btn-outline-danger" @click="confirmingDelete = true">
+            Supprimer
+          </button>
+        </div>
+      </header>
+
+      <div class="corps">
+        <section class="apercu" aria-label="Aperçu">
+          <template v-if="mobile">
+            <a :href="previewUrl(doc.id)" target="_blank" rel="noopener" class="apercu-mobile">
+              <img :src="thumbnailUrl(doc.id)" alt="" />
+              <span class="btn btn-outline-primary">Ouvrir l'aperçu</span>
+            </a>
+          </template>
+          <iframe v-else :key="doc.id" :src="previewUrl(doc.id)" :title="`Aperçu de ${doc.title}`" class="cadre" />
+        </section>
+
+        <section class="onglets">
+          <ul class="nav nav-tabs flex-nowrap mb-3 onglets-liste" role="tablist">
+            <li v-for="t in TABS" :key="t.value" class="nav-item" role="presentation">
+              <button
+                :id="`onglet-${t.value}`"
+                type="button"
+                class="nav-link"
+                :class="{ active: tab === t.value }"
+                role="tab"
+                :aria-selected="tab === t.value"
+                :aria-controls="`panneau-${t.value}`"
+                @click="tab = t.value"
+              >
+                {{ t.label }}<span v-if="t.value === 'notes' && notes.length" class="badge text-bg-secondary ms-1">{{ notes.length }}</span>
+              </button>
+            </li>
+          </ul>
+
+          <div :id="`panneau-${tab}`" role="tabpanel" :aria-labelledby="`onglet-${tab}`">
+            <div v-if="tab === 'details'" class="details" @keydown.enter="onEnter">
+              <p v-if="!canEdit" class="alert alert-info">Vous pouvez consulter ce document, pas le modifier.</p>
+              <div class="span-2">
+                <label class="form-label" for="titre">Titre</label>
+                <input id="titre" v-model="form.title" class="form-control" maxlength="128" required :disabled="!canEdit" />
+              </div>
+              <div>
+                <label class="form-label" for="numero">Numéro d'archive</label>
+                <input
+                  id="numero"
+                  type="number"
+                  min="0"
+                  step="1"
+                  inputmode="numeric"
+                  class="form-control"
+                  :value="form.archive_serial_number ?? ''"
+                  :disabled="!canEdit"
+                  @input="form.archive_serial_number = ($event.target as HTMLInputElement).value === '' ? null : Number(($event.target as HTMLInputElement).value)"
+                />
+              </div>
+              <div>
+                <label class="form-label" for="date">Date du document</label>
+                <input id="date" v-model="form.created" type="date" class="form-control" required :disabled="!canEdit" />
+              </div>
+              <ReferenceSelect id="correspondant" v-model="form.correspondent" kind="correspondants" label="Correspondant" :disabled="!canEdit" />
+              <ReferenceSelect id="type" v-model="form.document_type" kind="types" label="Type de document" :disabled="!canEdit" />
+              <ReferenceSelect id="chemin" v-model="form.storage_path" kind="chemins" label="Chemin de stockage" :disabled="!canEdit" />
+              <TagPicker id="etiquettes" v-model="form.tags" class="span-2" :disabled="!canEdit" />
+              <CustomFieldsEditor v-model="form.custom_fields" class="span-2" :disabled="!canEdit" />
+            </div>
+
+            <pre v-else-if="tab === 'contenu'" class="contenu">{{ doc.content || 'Aucun texte extrait.' }}</pre>
+
+            <DocumentMetadataPanel v-else-if="tab === 'metadonnees'" :document="doc" />
+
+            <DocumentNotes v-else v-model="notes" :document-id="doc.id" :disabled="!canEdit" />
+          </div>
+        </section>
+      </div>
+
+      <div v-if="canEdit" class="barre-actions">
+        <p v-if="saveError" class="alert alert-danger mb-0 me-auto" role="alert">{{ saveError }}</p>
+        <p v-else-if="saved && !dirty" class="text-success mb-0 me-auto" role="status">Document enregistré.</p>
+        <span v-else-if="dirty" class="text-body-secondary small me-auto">Modifications non enregistrées</span>
+        <button type="button" class="btn btn-outline-secondary" :disabled="!dirty || saving" @click="cancel">Annuler</button>
+        <button type="button" class="btn btn-outline-primary" :disabled="saving" @click="save(true)">Enregistrer et fermer</button>
+        <button type="button" class="btn btn-primary" :disabled="!dirty || saving" @click="save(false)">
+          <span v-if="saving" class="spinner-border spinner-border-sm me-1" aria-hidden="true" />
+          Enregistrer
+        </button>
+      </div>
+    </template>
+
+    <div v-else class="chargement">
+      <span class="spinner-border" role="status"><span class="visually-hidden">Chargement…</span></span>
+    </div>
+
+    <ConfirmDialog
+      :open="confirmingDelete"
+      title="Supprimer le document ?"
+      confirm-label="Supprimer"
+      danger
+      :busy="deleting"
+      @confirm="remove"
+      @cancel="confirmingDelete = false"
+    >
+      « {{ doc?.title }} » sera placé dans la corbeille de Paperless, d'où il pourra être restauré.
+    </ConfirmDialog>
+
+    <ConfirmDialog
+      :open="pendingLeave !== null"
+      title="Modifications non enregistrées"
+      confirm-label="Quitter sans enregistrer"
+      cancel-label="Rester"
+      danger
+      @confirm="confirmLeave"
+      @cancel="pendingLeave = null"
+    >
+      Les modifications de ce document seront perdues.
+    </ConfirmDialog>
+  </div>
+</template>
+
+<style scoped>
+.fiche {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.entete {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+}
+
+.retour {
+  flex-basis: 100%;
+  text-decoration: none;
+}
+
+.titre {
+  flex: 1 1 16rem;
+  overflow-wrap: anywhere;
+}
+
+.outils {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.position {
+  opacity: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.corps {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.apercu-mobile {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  text-decoration: none;
+}
+
+.apercu-mobile img {
+  width: 6rem;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  object-position: top;
+  border: var(--bs-border-width) solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius);
+  background: var(--bs-secondary-bg);
+}
+
+.cadre {
+  width: 100%;
+  height: calc(100dvh - 12rem);
+  min-height: 30rem;
+  border: var(--bs-border-width) solid var(--bs-border-color);
+  border-radius: var(--bs-border-radius);
+  background: var(--bs-secondary-bg);
+}
+
+.onglets-liste {
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.onglets-liste .nav-link {
+  white-space: nowrap;
+}
+
+.details {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 1rem;
+}
+
+.span-2 {
+  grid-column: 1 / -1;
+}
+
+.contenu {
+  max-height: 70dvh;
+  padding: 1rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: inherit;
+  background: var(--bs-tertiary-bg);
+  border-radius: var(--bs-border-radius);
+}
+
+.barre-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin: 0 -1rem -1rem;
+  padding: 0.75rem 1rem calc(0.75rem + env(safe-area-inset-bottom));
+  background: var(--bs-body-bg);
+  border-top: var(--bs-border-width) solid var(--bs-border-color);
+}
+
+.chargement {
+  display: flex;
+  justify-content: center;
+  padding: 3rem;
+}
+
+@media (min-width: 992px) {
+  .retour {
+    flex-basis: auto;
+  }
+
+  .corps {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .onglets {
+    order: 1;
+  }
+
+  .apercu {
+    position: sticky;
+    top: 4.5rem;
+    order: 2;
+  }
+
+  .barre-actions {
+    margin: 0 -1.5rem -1.5rem;
+    padding-inline: 1.5rem;
+  }
+}
+</style>

@@ -23,6 +23,25 @@ public static class SecurityHeaders
         "form-action 'self'; " +
         "frame-ancestors 'none'";
 
+    /// <summary>
+    /// Autorise l'affichage de cette réponse dans un cadre des pages Home-GED, et d'elles seules
+    /// (aperçu des documents dans la fiche). Toutes les autres réponses restent interdites de cadre.
+    /// </summary>
+    public static void AllowSameOriginFraming(HttpResponse response)
+    {
+        ArgumentNullException.ThrowIfNull(response);
+        response.Headers.ContentSecurityPolicy =
+            ContentSecurityPolicy.Replace("frame-ancestors 'none'", "frame-ancestors 'self'", StringComparison.Ordinal);
+        response.Headers.XFrameOptions = "SAMEORIGIN";
+    }
+
+    /// <summary>Contenu non maîtrisé : document isolé (origine opaque, aucun script).</summary>
+    public static void Sandbox(HttpResponse response)
+    {
+        ArgumentNullException.ThrowIfNull(response);
+        response.Headers.ContentSecurityPolicy = ContentSecurityPolicy + "; sandbox";
+    }
+
     public static IApplicationBuilder UseSecurityHeaders(this IApplicationBuilder app) =>
         app.Use((context, next) =>
         {
