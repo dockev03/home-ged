@@ -350,7 +350,7 @@ public sealed class DocumentEndpointsTests(AuthAppFixture fixture) : IClassFixtu
         return await fixture.Http.SendAsync(request);
     }
 
-    private JsonElement LastPaperlessBody() => JsonDocument.Parse(fixture.Paperless.LastBody!).RootElement;
+    private JsonElement LastPaperlessBody() => JsonElement.Parse(fixture.Paperless.LastBody!);
 
     [Fact]
     public async Task Fiche_relayee_avec_le_contenu_complet()
