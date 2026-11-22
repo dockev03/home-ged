@@ -46,7 +46,9 @@ docker compose run --rm --no-deps \
   backup restic restore latest --target /restore
 ```
 
-## 5. Restaurer la base de données
+## 5. Restaurer les bases de données
+
+Base Paperless :
 
 ```bash
 docker compose run --rm --no-deps \
@@ -54,6 +56,17 @@ docker compose run --rm --no-deps \
   backup pg_restore --clean --if-exists --no-owner --exit-on-error \
   -d paperless /dumps/paperless.dump
 ```
+
+Base Home-GED (sessions et clés de chiffrement). Sur une machine vierge, crée d'abord le rôle et la base : [Créer la base homeged](README.md#créer-la-base-homeged). `--role=homeged` rend les tables restaurées propriété de ce rôle :
+
+```bash
+docker compose run --rm --no-deps \
+  -v /opt/home-ged/restore:/dumps:ro \
+  backup pg_restore --clean --if-exists --no-owner --role=homeged --exit-on-error \
+  -d homeged /dumps/homeged.dump
+```
+
+Sans cette base, rien n'est perdu côté documents : il suffit de se reconnecter à Home-GED.
 
 ## 6. Démarrer et vérifier
 

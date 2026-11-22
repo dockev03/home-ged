@@ -18,7 +18,11 @@ public sealed class AppFixture : IAsyncLifetime
     public async Task InitializeAsync()
     {
         // Paperless pointe sur un port fermé : il est volontairement injoignable.
-        _app = HomeGedApp.Create(["--Paperless:BaseUrl=http://127.0.0.1:9", "--Paperless:TimeoutSeconds=2"],
+        _app = HomeGedApp.Create(
+            [
+                "--Paperless:BaseUrl=http://127.0.0.1:9", "--Paperless:TimeoutSeconds=2",
+                "--Database:ConnectionString=Host=127.0.0.1;Port=9;Timeout=2", "--Database:MigrateOnStartup=false",
+            ],
             b => b.WebHost.UseUrls("http://127.0.0.1:0"));
         await _app.StartAsync();
         var address = _app.Services.GetRequiredService<IServer>()

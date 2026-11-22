@@ -55,10 +55,20 @@ jobs:
         run: npm run build
 
   integration:
-    name: Intégration (Paperless réel)
+    name: Intégration (Paperless et PostgreSQL réels)
     runs-on: ubuntu-latest
-    # Même version que deploy/docker-compose.yml : à faire évoluer ensemble.
+    # Mêmes versions que deploy/docker-compose.yml : à faire évoluer ensemble.
     services:
+      postgres:
+        image: docker.io/library/postgres:18-alpine
+        ports: ["5432:5432"]
+        env:
+          POSTGRES_DB: homeged
+          POSTGRES_USER: homeged
+          POSTGRES_PASSWORD: ci-uniquement
+        options: >-
+          --health-cmd "pg_isready -U homeged -d homeged"
+          --health-interval 5s --health-timeout 5s --health-retries 20
       broker:
         image: docker.io/valkey/valkey:9-alpine
       paperless:
@@ -69,6 +79,8 @@ jobs:
           PAPERLESS_SECRET_KEY: ci-uniquement
           PAPERLESS_URL: http://localhost:8000
           PAPERLESS_BIND_ADDR: 0.0.0.0
+          PAPERLESS_ADMIN_USER: ci
+          PAPERLESS_ADMIN_PASSWORD: ci-uniquement
         options: >-
           --health-cmd "curl -fs http://localhost:8000/ -o /dev/null"
           --health-interval 10s --health-timeout 5s --health-retries 30
@@ -81,6 +93,9 @@ jobs:
         run: dotnet test tests/HomeGed.IntegrationTests --configuration Release
         env:
           PAPERLESS_URL: http://localhost:8000
+          PAPERLESS_USER: ci
+          PAPERLESS_PASSWORD: ci-uniquement
+          HOMEGED_DB: Host=localhost;Database=homeged;Username=homeged;Password=ci-uniquement
 
   images:
     name: Images ${{ matrix.image.name }}

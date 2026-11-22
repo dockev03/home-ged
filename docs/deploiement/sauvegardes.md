@@ -1,7 +1,7 @@
 # Sauvegardes : VPS → ReadyNAS 102 en SFTP
 
 Chaque nuit, le conteneur `backup` :
-1. fait un `pg_dump` de la base Paperless ;
+1. fait un `pg_dump` des bases `paperless` et `homeged` ;
 2. envoie le dump et les volumes `data` et `media` dans un dépôt **restic chiffré** sur le NAS, en SFTP ;
 3. applique la rétention (7 jours, 4 semaines, 12 mois) et vérifie le dépôt (5 % des données relues le dimanche).
 

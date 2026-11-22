@@ -1,9 +1,13 @@
 using System.Net;
 using System.Reflection;
+using HomeGed.Api.Auth;
+using HomeGed.Api.Data;
 using HomeGed.Api.Hosting;
 using HomeGed.Api.Paperless;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
 namespace HomeGed.Api;
@@ -46,8 +50,38 @@ public static class HomeGedApp
                 UseCookies = false,
             });
 
+        // Base homeged : sessions et clés Data Protection.
+        builder.Services.AddOptions<DatabaseOptions>()
+            .Bind(builder.Configuration.GetSection(DatabaseOptions.Section))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+        builder.Services.AddDbContext<HomeGedDbContext>((sp, o) =>
+            o.UseNpgsql(sp.GetRequiredService<IOptions<DatabaseOptions>>().Value.ConnectionString));
+        builder.Services.AddHostedService<DatabaseMigrator>();
+
+        // Le token Paperless est chiffré au repos ; clés partagées par toutes les versions de l'image.
+        builder.Services.AddDataProtection()
+            .SetApplicationName("HomeGed")
+            .PersistKeysToDbContext<HomeGedDbContext>();
+
+        // Authentification par cookie de session (§3.2) et limitation des tentatives (H8).
+        builder.Services.AddOptions<AuthOptions>()
+            .Bind(builder.Configuration.GetSection(AuthOptions.Section))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+        builder.Services.AddSingleton(TimeProvider.System);
+        builder.Services.AddSingleton<LoginThrottle>();
+        builder.Services.AddSingleton<PaperlessTokenProtector>();
+        builder.Services.AddScoped<ISessionStore, EfSessionStore>();
+        builder.Services.AddHostedService<SessionCleanupService>();
+        builder.Services.AddAuthentication(SessionAuthenticationHandler.SchemeName)
+            .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, SessionAuthenticationHandler>(
+                SessionAuthenticationHandler.SchemeName, null);
+        builder.Services.AddAuthorization();
+
         builder.Services.AddHealthChecks()
-            .AddCheck<PaperlessHealthCheck>("paperless", tags: ["ready"]);
+            .AddCheck<PaperlessHealthCheck>("paperless", tags: ["ready"])
+            .AddCheck<DatabaseHealthCheck>("database", tags: ["ready"]);
 
         // Derrière Nginx Proxy Manager : IP client et schéma HTTPS d'origine.
         builder.Services.Configure<ForwardedHeadersOptions>(o =>
@@ -73,15 +107,20 @@ public static class HomeGedApp
         }
 
         app.UseSecurityHeaders();
+        app.UseApiAntiForgery();
+        app.UseAuthentication();
+        app.UseAuthorization();
 
         // Vivacité (Docker) : ne dépend de rien. Disponibilité : vérifie Paperless.
         app.MapHealthChecks("/health", new HealthCheckOptions { Predicate = _ => false });
         app.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = c => c.Tags.Contains("ready") });
 
-        var api = app.MapGroup("/api");
-        api.MapGet("/info", () => TypedResults.Ok(new AppInfo(AppVersion)));
+        // Toute route /api exige une session, sauf mention contraire.
+        var api = app.MapGroup("/api").RequireAuthorization();
+        api.MapGet("/info", () => TypedResults.Ok(new AppInfo(AppVersion))).AllowAnonymous();
+        api.MapAuth();
         // Toute autre route /api/* : 404 JSON, jamais la page de l'application.
-        api.Map("/{**rest}", () => Results.Problem(statusCode: (int)HttpStatusCode.NotFound));
+        api.Map("/{**rest}", () => Results.Problem(statusCode: (int)HttpStatusCode.NotFound)).AllowAnonymous();
 
         // Front Vue buildé (wwwroot) : fichiers fingerprintés en cache long, index.html jamais en cache.
         app.UseStaticFiles(new StaticFileOptions

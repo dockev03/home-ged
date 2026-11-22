@@ -143,6 +143,7 @@ services:
     image: ghcr.io/dockev03/home-ged:${HOMEGED_VERSION:?HOMEGED_VERSION manquant}
     restart: unless-stopped
     depends_on:
+      db: { condition: service_healthy }
       webserver: { condition: service_healthy }
     networks:
       ged:
@@ -150,6 +151,9 @@ services:
         aliases: [home-ged]
     environment:
       Paperless__BaseUrl: http://webserver:8000
+      # Base « homeged » et rôle dédié, sans droit sur la base Paperless
+      # (création : docs/deploiement/README.md). Migrations appliquées au démarrage.
+      Database__ConnectionString: Host=db;Database=homeged;Username=homeged;Password=${HOMEGED_DB_PASSWORD:?HOMEGED_DB_PASSWORD manquant}
       # Sous-réseau du réseau NPM : seul NPM peut fournir l'IP client (X-Forwarded-For).
       ReverseProxy__KnownNetworks__0: ${NPM_SUBNET:?NPM_SUBNET manquant}
     # Healthcheck fourni par l'image (/health). Conteneur durci : système de
@@ -183,7 +187,7 @@ services:
       PGHOST: db
       PGUSER: paperless
       PGPASSWORD: ${POSTGRES_PASSWORD}
-      PG_DATABASES: paperless
+      PG_DATABASES: paperless homeged
       RESTIC_REPOSITORY: ${RESTIC_REPOSITORY:?RESTIC_REPOSITORY manquant}
       RESTIC_PASSWORD: ${RESTIC_PASSWORD:?RESTIC_PASSWORD manquant}
       RESTIC_CACHE_DIR: /cache

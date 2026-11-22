@@ -22,3 +22,9 @@ dotnet_diagnostic.CA2007.severity = none
 
 [*.md]
 trim_trailing_whitespace = false
+
+# Migrations EF Core : code généré par `dotnet ef`, laissé tel quel.
+[src/back/HomeGed.Api/Data/Migrations/*.cs]
+generated_code = true
+charset = unset
+csharp_style_namespace_declarations = unset
