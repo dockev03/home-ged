@@ -14,13 +14,17 @@ Toutes les commandes se lancent depuis le dossier `deploy/` sur le VPS.
 
 ## 1. Préparer la stack sans démarrer Paperless
 
+Prépare d'abord `.env` avec les valeurs d'origine (au moins `RESTIC_PASSWORD`, `POSTGRES_PASSWORD` et `HOMEGED_DB_PASSWORD`), puis :
+
 ```bash
-docker compose build backup
+docker compose pull
 ```
 
 ```bash
-docker compose up -d db broker
+docker compose up -d db broker init-db
 ```
+
+`init-db` crée le rôle et la base `homeged` (vides), prêts à recevoir la restauration.
 
 ## 2. Lister les sauvegardes disponibles
 
@@ -57,7 +61,7 @@ docker compose run --rm --no-deps \
   -d paperless /dumps/paperless.dump
 ```
 
-Base Home-GED (sessions et clés de chiffrement). Sur une machine vierge, crée d'abord le rôle et la base : [Créer la base homeged](README.md#créer-la-base-homeged). `--role=homeged` rend les tables restaurées propriété de ce rôle :
+Base Home-GED (sessions, liens de partage et clés de chiffrement), créée vide par `init-db` à l'étape 1. `--role=homeged` rend les tables restaurées propriété de ce rôle :
 
 ```bash
 docker compose run --rm --no-deps \

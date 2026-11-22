@@ -1,7 +1,9 @@
 # Home-GED — Paperless-ngx, surcouche Home-GED et sauvegardes
 #
-# Déploiement : stack Portainer (ou `docker compose up -d` dans ce dossier).
+# Déploiement : `sudo ./install.sh` dans ce dossier, ou stack Portainer (coller ce
+# fichier, puis « Load variables from .env file »).
 # Configuration : variables d'environnement, voir `.env.example`.
+# Aucune étape manuelle sur la base : le service init-db crée la base « homeged ».
 # Documentation : docs/deploiement/
 #
 # Aucun port n'est publié sur l'hôte : seul Nginx Proxy Manager joint Home-GED et
@@ -53,6 +55,39 @@ services:
         limits: { memory: 1g }
     logging: *logging
 
+  init-db:
+    # Initialisation de la base Home-GED, exécutée à chaque démarrage puis arrêtée.
+    # Crée le rôle « homeged » et sa base s'ils manquent, aligne le mot de passe du rôle
+    # sur HOMEGED_DB_PASSWORD et retire l'accès par défaut (PUBLIC) aux deux bases :
+    # « homeged » ne peut pas se connecter à la base Paperless, ni l'inverse.
+    # Rejouable sans effet de bord : rien n'est jamais supprimé.
+    image: docker.io/library/postgres:18-alpine
+    restart: "no"
+    depends_on:
+      db: { condition: service_healthy }
+    networks: [ged]
+    environment:
+      PGHOST: db
+      PGUSER: paperless
+      PGDATABASE: paperless
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      HOMEGED_DB_PASSWORD: ${HOMEGED_DB_PASSWORD:?HOMEGED_DB_PASSWORD manquant}
+    entrypoint: ["/bin/sh", "-c"]
+    # Le mot de passe passe par une variable psql (:'pwd') : jamais interprété comme du SQL.
+    command:
+      - |
+        psql -v ON_ERROR_STOP=1 -v pwd="$$HOMEGED_DB_PASSWORD" <<'SQL'
+        SELECT 'CREATE ROLE homeged LOGIN' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'homeged') \gexec
+        SELECT format('ALTER ROLE homeged LOGIN PASSWORD %L', :'pwd') \gexec
+        SELECT 'CREATE DATABASE homeged OWNER homeged' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'homeged') \gexec
+        REVOKE CONNECT ON DATABASE homeged FROM PUBLIC;
+        REVOKE CONNECT ON DATABASE paperless FROM PUBLIC;
+        SQL
+    deploy:
+      resources:
+        limits: { memory: 64m }
+    logging: *logging
+
   webserver:
     image: ghcr.io/paperless-ngx/paperless-ngx:3.5.1
     restart: unless-stopped
@@ -91,6 +126,10 @@ services:
       PAPERLESS_PROXY_SSL_HEADER: '["HTTP_X_FORWARDED_PROTO", "https"]'
       PAPERLESS_ACCOUNT_ALLOW_SIGNUPS: "false"
       PAPERLESS_TOKEN_THROTTLE_RATE: 5/min
+      # Premier compte administrateur, créé au démarrage s'il n'existe pas (facultatif).
+      # Vider PAPERLESS_ADMIN_PASSWORD une fois le compte créé et son 2FA activé.
+      PAPERLESS_ADMIN_USER: ${PAPERLESS_ADMIN_USER:-}
+      PAPERLESS_ADMIN_PASSWORD: ${PAPERLESS_ADMIN_PASSWORD:-}
       # Langue et fuseau
       PAPERLESS_TIME_ZONE: Europe/Paris
       PAPERLESS_OCR_LANGUAGE: fra+eng
@@ -143,7 +182,7 @@ services:
     image: ghcr.io/dockev03/home-ged:${HOMEGED_VERSION:?HOMEGED_VERSION manquant}
     restart: unless-stopped
     depends_on:
-      db: { condition: service_healthy }
+      init-db: { condition: service_completed_successfully }
       webserver: { condition: service_healthy }
     networks:
       ged:
@@ -152,7 +191,7 @@ services:
     environment:
       Paperless__BaseUrl: http://webserver:8000
       # Base « homeged » et rôle dédié, sans droit sur la base Paperless
-      # (création : docs/deploiement/README.md). Migrations appliquées au démarrage.
+      # (créés par init-db). Migrations appliquées au démarrage.
       Database__ConnectionString: Host=db;Database=homeged;Username=homeged;Password=${HOMEGED_DB_PASSWORD:?HOMEGED_DB_PASSWORD manquant}
       # Sous-réseau du réseau NPM : seul NPM peut fournir l'IP client (X-Forwarded-For).
       ReverseProxy__KnownNetworks__0: ${NPM_SUBNET:?NPM_SUBNET manquant}
@@ -176,7 +215,7 @@ services:
     hostname: home-ged-backup
     restart: unless-stopped
     depends_on:
-      db: { condition: service_healthy }
+      init-db: { condition: service_completed_successfully }
     networks: [ged]
     volumes:
       - data:/source/data:ro

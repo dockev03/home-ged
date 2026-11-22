@@ -19,7 +19,7 @@ namespace HomeGed.IntegrationTests;
 /// Home-GED complet (BFF + base homeged) devant un Paperless réel : un document texte est importé
 /// dans Paperless, puis lu, filtré, modifié et versionné à travers les relais de Home-GED.
 /// </summary>
-public sealed class HomeGedAppFixture : IAsyncLifetime
+public class HomeGedAppFixture : IAsyncLifetime
 {
     private WebApplication? _app;
 
@@ -27,8 +27,11 @@ public sealed class HomeGedAppFixture : IAsyncLifetime
 
     public HttpClient Http { get; private set; } = null!;
 
-    /// <summary>Accès direct à Paperless (préparation du jeu d'essai uniquement).</summary>
+    /// <summary>Accès direct à Paperless avec le compte admin de la CI (préparation du jeu d'essai uniquement).</summary>
     public HttpClient Paperless { get; private set; } = null!;
+
+    /// <summary>Services de l'application démarrée (accès direct à la base homeged pour certains cas).</summary>
+    public IServiceProvider Services => _app!.Services;
 
     public string Marker { get; } = "homeged" + Guid.NewGuid().ToString("N")[..12];
 
@@ -36,12 +39,20 @@ public sealed class HomeGedAppFixture : IAsyncLifetime
 
     public int UserId { get; private set; }
 
-    public async Task InitializeAsync()
+    public virtual async Task InitializeAsync()
     {
+        Paperless = new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false, UseCookies = false });
+        PaperlessClient.Configure(Paperless, new PaperlessOptions { BaseUrl = IntegrationEnvironment.PaperlessUrl });
+        Paperless.Timeout = TimeSpan.FromSeconds(60);
+        Paperless.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Basic",
+            Convert.ToBase64String(Encoding.UTF8.GetBytes($"{IntegrationEnvironment.PaperlessUser}:{IntegrationEnvironment.PaperlessPassword}")));
+
         _app = HomeGedApp.Create(
             [
                 $"--Paperless:BaseUrl={IntegrationEnvironment.PaperlessUrl}",
                 $"--Database:ConnectionString={IntegrationEnvironment.HomeGedDb}",
+                .. await AdditionalArgumentsAsync(),
             ],
             b => b.WebHost.UseUrls("http://127.0.0.1:0"));
         await _app.StartAsync();
@@ -49,23 +60,7 @@ public sealed class HomeGedAppFixture : IAsyncLifetime
         // Cookie de session à la main : il est Secure et le test parle HTTP.
         Http = new HttpClient(new SocketsHttpHandler { UseCookies = false }) { BaseAddress = new Uri(address) };
 
-        using var login = await SendAsync(HttpMethod.Post, "/api/auth/login", new
-        {
-            username = IntegrationEnvironment.PaperlessUser,
-            password = IntegrationEnvironment.PaperlessPassword,
-        });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        _cookie = login.Headers.GetValues("Set-Cookie")
-            .Single(h => h.StartsWith(SessionTokens.CookieName + "=", StringComparison.Ordinal))
-            .Split(';')[0][(SessionTokens.CookieName.Length + 1)..];
-        UserId = (await login.Content.ReadFromJsonAsync<CurrentUser>())!.Id;
-
-        Paperless = new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false, UseCookies = false });
-        PaperlessClient.Configure(Paperless, new PaperlessOptions { BaseUrl = IntegrationEnvironment.PaperlessUrl });
-        Paperless.Timeout = TimeSpan.FromSeconds(60);
-        Paperless.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
-            "Basic",
-            Convert.ToBase64String(Encoding.UTF8.GetBytes($"{IntegrationEnvironment.PaperlessUser}:{IntegrationEnvironment.PaperlessPassword}")));
+        (_cookie, UserId) = await LoginAsync(IntegrationEnvironment.PaperlessUser, IntegrationEnvironment.PaperlessPassword);
 
         using var form = TextFile("document", $"facture-{Marker}.txt", $"Facture d'intégration {Marker}\nMontant 84,12 EUR");
         using var upload = await Paperless.PostAsync(new Uri("api/documents/post_document/", UriKind.Relative), form);
@@ -74,7 +69,47 @@ public sealed class HomeGedAppFixture : IAsyncLifetime
         DocumentId = await WaitForDocumentAsync(Guid.Parse(task!));
     }
 
-    public async Task DisposeAsync()
+    /// <summary>Arguments de configuration ajoutés au démarrage de Home-GED (préparés avant lui, avec <see cref="Paperless"/>).</summary>
+    protected virtual Task<IEnumerable<string>> AdditionalArgumentsAsync() => Task.FromResult(Enumerable.Empty<string>());
+
+    /// <summary>Connexion à Home-GED : renvoie la valeur du cookie de session et l'identifiant Paperless.</summary>
+    public async Task<(string Cookie, int UserId)> LoginAsync(string username, string password)
+    {
+        using var login = await SendAsync(HttpMethod.Post, "/api/auth/login", new { username, password }, cookie: "");
+        Assert.True(login.StatusCode == HttpStatusCode.OK, $"Connexion de {username} : HTTP {(int)login.StatusCode} {await login.Content.ReadAsStringAsync()}");
+        var cookie = login.Headers.GetValues("Set-Cookie")
+            .Single(h => h.StartsWith(SessionTokens.CookieName + "=", StringComparison.Ordinal))
+            .Split(';')[0][(SessionTokens.CookieName.Length + 1)..];
+        return (cookie, (await login.Content.ReadFromJsonAsync<CurrentUser>())!.Id);
+    }
+
+    /// <summary>Crée un utilisateur Paperless ordinaire (ni admin ni superutilisateur) et renvoie son identifiant.</summary>
+    public async Task<int> CreatePaperlessUserAsync(string username, string password, params string[] permissions)
+    {
+        using var created = await Paperless.PostAsync(new Uri("api/users/", UriKind.Relative), Json(new
+        {
+            username,
+            password,
+            is_active = true,
+            is_staff = false,
+            is_superuser = false,
+            user_permissions = permissions,
+        }));
+        var text = await created.Content.ReadAsStringAsync();
+        Assert.True(created.StatusCode == HttpStatusCode.Created, $"Création de {username} : HTTP {(int)created.StatusCode} {text}");
+        return JsonElement.Parse(text).GetProperty("id").GetInt32();
+    }
+
+    /// <summary>Supprime un utilisateur Paperless créé par un test (sans échec si déjà absent).</summary>
+    public async Task DeletePaperlessUserAsync(int id)
+    {
+        if (id > 0)
+        {
+            using var _ = await Paperless.DeleteAsync(new Uri($"api/users/{id}/", UriKind.Relative));
+        }
+    }
+
+    public virtual async Task DisposeAsync()
     {
         if (DocumentId > 0)
         {
@@ -89,17 +124,23 @@ public sealed class HomeGedAppFixture : IAsyncLifetime
         }
     }
 
+    /// <summary>Corps JSON de longueur connue : Paperless (Django) ne lit pas les corps envoyés en flux (chunked).</summary>
+    public static StringContent Json(object body) =>
+        new(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
+
     public static MultipartFormDataContent TextFile(string field, string name, string text) =>
         new() { { new StringContent(text, Encoding.UTF8, "text/plain"), field, name } };
 
     /// <summary>Requête au BFF avec la session et l'en-tête anti-CSRF.</summary>
-    public async Task<HttpResponseMessage> SendAsync(HttpMethod method, string path, object? body = null)
+    /// <param name="cookie">Session d'un autre utilisateur ; par défaut, celle du compte de la CI. Vide : sans session.</param>
+    public async Task<HttpResponseMessage> SendAsync(HttpMethod method, string path, object? body = null, string? cookie = null)
     {
         using var request = new HttpRequestMessage(method, new Uri(path, UriKind.Relative));
         request.Headers.TryAddWithoutValidation(AntiForgery.HeaderName, "HomeGed");
-        if (_cookie.Length > 0)
+        cookie ??= _cookie;
+        if (cookie.Length > 0)
         {
-            request.Headers.TryAddWithoutValidation("Cookie", $"{SessionTokens.CookieName}={_cookie}");
+            request.Headers.TryAddWithoutValidation("Cookie", $"{SessionTokens.CookieName}={cookie}");
         }
 
         request.Content = body switch
