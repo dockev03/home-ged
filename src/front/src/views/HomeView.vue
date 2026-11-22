@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { getAppInfo } from '../api/http'
+import UploadButton from '../components/UploadButton.vue'
 
 const version = ref<string | null>(null)
 
@@ -19,7 +20,13 @@ onMounted(async () => {
     <p class="text-body-secondary">
       Les widgets (vues sauvegardées, derniers ajouts, échéances) arrivent à l'étape 2.
     </p>
-    <RouterLink class="btn btn-primary" :to="{ name: 'documents' }">Parcourir les documents</RouterLink>
+    <div class="d-flex flex-wrap gap-2">
+      <UploadButton />
+      <RouterLink class="btn btn-outline-primary" :to="{ name: 'documents' }">Parcourir les documents</RouterLink>
+    </div>
+    <p class="text-body-secondary small mb-0">
+      Sur ordinateur, vous pouvez aussi glisser-déposer des fichiers n'importe où dans Home-GED.
+    </p>
     <p v-if="version" class="version text-body-secondary">Home-GED, version {{ version }}</p>
   </div>
 </template>

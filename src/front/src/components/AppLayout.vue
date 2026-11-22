@@ -1,11 +1,15 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { MOBILE_QUERY, useMediaQuery } from '../composables/mediaQuery'
+import { useUploadsStore } from '../stores/uploads'
+import UploadPanel from './UploadPanel.vue'
 import UserMenu from './UserMenu.vue'
 
 /**
  * Coque de l'application (UI-01) : barre du haut avec recherche globale et menu utilisateur,
- * menu latéral fixe sur PC, en tiroir sur mobile.
+ * menu latéral fixe sur PC, en tiroir sur mobile. Dépôt de fichiers par glisser-déposer et suivi
+ * des envois (PWA-07).
  */
 const route = useRoute()
 const router = useRouter()
@@ -58,6 +62,48 @@ function submitSearch() {
   void router.push({ name: 'documents', query: q ? { q, mode: 'avance', tri: 'pertinence' } : {} })
 }
 
+const mobile = useMediaQuery(MOBILE_QUERY)
+const uploads = useUploadsStore()
+
+// Glisser-déposer de fichiers n'importe où dans l'application (PC).
+const dragging = ref(false)
+let dragDepth = 0
+const hasFiles = (event: DragEvent) => event.dataTransfer?.types.includes('Files') ?? false
+
+function onDragEnter(event: DragEvent) {
+  if (!hasFiles(event)) return
+  dragDepth++
+  dragging.value = true
+}
+
+function onDragLeave(event: DragEvent) {
+  if (!hasFiles(event)) return
+  dragDepth = Math.max(0, dragDepth - 1)
+  if (dragDepth === 0) dragging.value = false
+}
+
+function onDragOver(event: DragEvent) {
+  if (!hasFiles(event)) return
+  event.preventDefault()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+}
+
+function onDrop(event: DragEvent) {
+  if (!hasFiles(event)) return
+  event.preventDefault()
+  dragDepth = 0
+  dragging.value = false
+  const files = event.dataTransfer?.files
+  if (files?.length) uploads.add([...files])
+}
+
+// Quitter ou recharger la page interromprait les envois en cours.
+function onBeforeUnload(event: BeforeUnloadEvent) {
+  if (uploads.active) event.preventDefault()
+}
+onMounted(() => window.addEventListener('beforeunload', onBeforeUnload))
+onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload))
+
 // Pas de défilement de la page derrière le tiroir ouvert.
 watch(drawerOpen, (open) => document.body.classList.toggle('overflow-hidden', open))
 onBeforeUnmount(() => document.body.classList.remove('overflow-hidden'))
@@ -92,7 +138,13 @@ onBeforeUnmount(() => document.body.classList.remove('overflow-hidden'))
     </div>
   </header>
 
-  <div class="coque">
+  <div
+    class="coque"
+    @dragenter="onDragEnter"
+    @dragleave="onDragLeave"
+    @dragover="onDragOver"
+    @drop="onDrop"
+  >
     <nav
       id="menu-principal"
       ref="drawer"
@@ -132,8 +184,13 @@ onBeforeUnmount(() => document.body.classList.remove('overflow-hidden'))
     <div v-if="drawerOpen" class="offcanvas-backdrop fade show d-lg-none" @click="drawerOpen = false" />
 
     <main id="contenu" class="contenu" tabindex="-1">
+      <UploadPanel v-if="mobile" />
       <RouterView />
     </main>
+  </div>
+  <UploadPanel v-if="!mobile" floating />
+  <div v-if="dragging" class="depot" aria-hidden="true">
+    <p class="depot-texte">Déposez les fichiers pour les ajouter à Paperless</p>
   </div>
 </template>
 
@@ -163,6 +220,29 @@ onBeforeUnmount(() => document.body.classList.remove('overflow-hidden'))
 
 .menu {
   --bs-offcanvas-width: 17rem;
+}
+
+/* Zone de dépôt : n'intercepte pas les événements, la coque les reçoit. */
+.depot {
+  position: fixed;
+  inset: 0;
+  z-index: 1060;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  pointer-events: none;
+  background: rgba(var(--bs-primary-rgb), 0.12);
+  border: 3px dashed var(--bs-primary);
+}
+
+.depot-texte {
+  margin: 0;
+  padding: 1rem 1.5rem;
+  border-radius: var(--bs-border-radius-lg);
+  background: var(--bs-body-bg);
+  font-size: 1.25rem;
+  font-weight: 600;
 }
 
 .menu-titre {

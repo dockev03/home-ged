@@ -10,7 +10,7 @@ namespace HomeGed.Api.Documents;
 
 /// <summary>
 /// Relais vers Paperless pour la liste des documents, ses filtres (UI-02, UI-03), les actions en
-/// masse (UI-06) et la fiche document (UI-04, UI-05). Chaque appel part avec le token de l'utilisateur : Paperless applique
+/// masse (UI-06), l'ajout de documents (PWA-07) et la fiche document (UI-04, UI-05). Chaque appel part avec le token de l'utilisateur : Paperless applique
 /// ses droits. Seuls les paramètres et les champs connus sont transmis.
 /// </summary>
 public static class DocumentEndpoints
@@ -68,6 +68,7 @@ public static class DocumentEndpoints
         api.MapGet("/documents/ids", IdsAsync);
         api.MapPost("/documents/actions", BulkEditAsync);
         api.MapPost("/documents/telechargement", BulkDownloadAsync);
+        api.MapPost("/documents/upload", UploadAsync);
         api.MapGet("/documents/{id:int}", GetAsync);
         api.MapPatch("/documents/{id:int}", UpdateAsync);
         api.MapDelete("/documents/{id:int}", DeleteAsync);
@@ -401,8 +402,26 @@ public static class DocumentEndpoints
     /// Nouvelle version du document : le multipart du navigateur (champ <c>document</c>, libellé
     /// facultatif <c>version_label</c>) est relayé en flux. Paperless la traite en tâche de fond (OCR).
     /// </summary>
-    private static async Task<IResult> UploadVersionAsync(
-        int id, HttpContext context, PaperlessRelay relay, CancellationToken cancellationToken)
+    private static Task<IResult> UploadVersionAsync(
+        int id, HttpContext context, PaperlessRelay relay, CancellationToken cancellationToken) =>
+        RelayUploadAsync(
+            context, relay, Path(id, "update_version/"), "Vous ne pouvez pas modifier ce document.", cancellationToken);
+
+    /// <summary>
+    /// Ajout d'un document (PWA-07) : le multipart du navigateur (champ <c>document</c>) est relayé en
+    /// flux vers <c>post_document</c>. Paperless le consomme en tâche de fond (OCR, classement) ; le
+    /// document appartient à l'utilisateur, avec ses permissions par défaut.
+    /// </summary>
+    private static Task<IResult> UploadAsync(HttpContext context, PaperlessRelay relay, CancellationToken cancellationToken) =>
+        RelayUploadAsync(
+            context, relay, "api/documents/post_document/", "Votre compte n'a pas le droit d'ajouter des documents.", cancellationToken);
+
+    /// <summary>
+    /// Relais d'un envoi de fichier : multipart vérifié (type, taille annoncée, 200 Mo au plus) puis
+    /// transmis au fil de sa réception. Rend 202 et l'identifiant de la tâche Paperless.
+    /// </summary>
+    private static async Task<IResult> RelayUploadAsync(
+        HttpContext context, PaperlessRelay relay, string uri, string forbidden, CancellationToken cancellationToken)
     {
         var request = context.Request;
         if (!System.Net.Http.Headers.MediaTypeHeaderValue.TryParse(request.ContentType, out var type)
@@ -426,7 +445,7 @@ public static class DocumentEndpoints
         content.Headers.ContentType = type;
         content.Headers.ContentLength = length;
         return (await relay.SendAsync(
-            context, HttpMethod.Post, Path(id, "update_version/"), null,
+            context, HttpMethod.Post, uri, null,
             async (response, ct) =>
             {
                 var task = await response.Content.ReadFromJsonAsync<JsonNode>(ct);
@@ -436,7 +455,7 @@ public static class DocumentEndpoints
             },
             cancellationToken,
             onError: status => status == HttpStatusCode.Forbidden
-                ? PaperlessRelay.Problem(HttpStatusCode.Forbidden, "Vous ne pouvez pas modifier ce document.", "acces_refuse")
+                ? PaperlessRelay.Problem(HttpStatusCode.Forbidden, forbidden, "acces_refuse")
                 : null,
             upload: content))!;
     }

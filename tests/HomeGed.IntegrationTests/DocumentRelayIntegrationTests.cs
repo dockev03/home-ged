@@ -404,4 +404,27 @@ public sealed class DocumentRelayIntegrationTests(HomeGedAppFixture app) : IClas
 
         Assert.Fail($"{what} : non constaté après 10 s (réponse de l'action : {bulkResponse}).");
     }
+
+    [Fact]
+    public async Task Ajout_d_un_document_puis_suivi_de_sa_consommation()
+    {
+        using var form = HomeGedAppFixture.TextFile("document", $"ajout-{app.Marker}.txt", $"Ajout depuis Home-GED {app.Marker} {Guid.NewGuid():N}");
+        using var upload = await app.SendAsync(HttpMethod.Post, "/api/documents/upload", form);
+        Assert.Equal(HttpStatusCode.Accepted, upload.StatusCode);
+        var task = JsonElement.Parse(await upload.Content.ReadAsStringAsync()).GetProperty("tache").GetGuid();
+
+        var created = await app.WaitForDocumentAsync(task);
+        try
+        {
+            var document = await app.GetJsonAsync($"/api/documents/{created}");
+            Assert.Contains("Ajout depuis Home-GED", document.GetProperty("content").GetString(), StringComparison.Ordinal);
+            var state = await app.GetJsonAsync($"/api/taches/{task:D}");
+            Assert.Equal("success", state.GetProperty("status").GetString());
+            Assert.Equal(created, state.GetProperty("document_id").GetInt32());
+        }
+        finally
+        {
+            using var _ = await app.SendAsync(HttpMethod.Delete, $"/api/documents/{created}");
+        }
+    }
 }

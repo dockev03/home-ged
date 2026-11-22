@@ -79,6 +79,14 @@ internal static class FakePaperlessDocuments
             case "/api/documents/6/history/":
                 return new HttpResponseMessage(HttpStatusCode.BadRequest) { Content = new StringContent("Audit log is disabled") };
 
+            case "/api/documents/post_document/" when token == "tok-bob":
+                return FakePaperless.Json(HttpStatusCode.Forbidden, """{"detail":"You do not have permission to perform this action."}""");
+
+            case "/api/documents/post_document/":
+                return request.Content!.Headers.ContentType!.MediaType == "multipart/form-data"
+                    ? FakePaperless.Json(HttpStatusCode.OK, "\"3f2504e0-4f89-11d3-9a0c-0305e82c3302\"")
+                    : FakePaperless.Json(HttpStatusCode.BadRequest, """{"document":["No file was submitted."]}""");
+
             case "/api/documents/5/update_version/":
                 return request.Content!.Headers.ContentType!.MediaType == "multipart/form-data"
                     ? FakePaperless.Json(HttpStatusCode.OK, "\"3f2504e0-4f89-11d3-9a0c-0305e82c3301\"")
@@ -1051,4 +1059,63 @@ public sealed class DocumentEndpointsTests(AuthAppFixture fixture) : IClassFixtu
     [InlineData("", false)]
     public void Tache_d_action_en_masse_lue_dans_les_deux_formats(string body, bool found) =>
         Assert.Equal(found, DocumentEndpoints.BulkTask(body).HasValue);
+
+    private static MultipartFormDataContent PdfForm(string name = "facture.pdf") => new()
+    {
+        { new ByteArrayContent([37, 80, 68, 70]) { Headers = { ContentType = new("application/pdf") } }, "document", name },
+    };
+
+    [Fact]
+    public async Task Ajout_de_document_relaye_en_flux_vers_post_document()
+    {
+        var cookie = await LoginAsync();
+        using var form = PdfForm();
+
+        using var response = await SendAsync(HttpMethod.Post, "/api/documents/upload", cookie, form);
+
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+        Assert.Equal("""{"tache":"3f2504e0-4f89-11d3-9a0c-0305e82c3302"}""", await response.Content.ReadAsStringAsync());
+        var sent = fixture.Paperless.LastRequest!;
+        Assert.Equal("/api/documents/post_document/", sent.RequestUri!.AbsolutePath);
+        Assert.Equal("tok-alice", sent.Headers.Authorization!.Parameter);
+        Assert.Contains("name=document; filename=facture.pdf", fixture.Paperless.LastBody, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Ajout_de_document_exige_un_envoi_de_fichier()
+    {
+        var cookie = await LoginAsync();
+        var calls = fixture.Paperless.Calls;
+
+        using var response = await SendAsync(HttpMethod.Post, "/api/documents/upload", cookie, new { document = "x" });
+
+        Assert.Equal(HttpStatusCode.UnsupportedMediaType, response.StatusCode);
+        Assert.Equal(calls, fixture.Paperless.Calls);
+    }
+
+    [Fact]
+    public async Task Ajout_de_document_refuse_par_Paperless_donne_403_explicite()
+    {
+        var cookie = await LoginAsync("bob", "123456");
+        using var form = PdfForm();
+
+        using var response = await SendAsync(HttpMethod.Post, "/api/documents/upload", cookie, form);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal("acces_refuse", await ErrorCodeAsync(response));
+        Assert.Contains("ajouter des documents", await response.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Ajout_de_document_sans_session_ni_en_tete_anti_CSRF_refuse()
+    {
+        using var anonymous = await SendAsync(HttpMethod.Post, "/api/documents/upload", null, PdfForm());
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+
+        var cookie = await LoginAsync();
+        var calls = fixture.Paperless.Calls;
+        using var forged = await SendAsync(HttpMethod.Post, "/api/documents/upload", cookie, PdfForm(), antiForgery: false);
+        Assert.Equal(HttpStatusCode.Forbidden, forged.StatusCode);
+        Assert.Equal(calls, fixture.Paperless.Calls);
+    }
 }

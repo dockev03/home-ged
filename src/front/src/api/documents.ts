@@ -230,21 +230,13 @@ export const deleteVersion = (id: number, versionId: number) =>
 export const MAX_UPLOAD_BYTES = 200 * 1024 * 1024
 
 /**
- * Envoie une nouvelle version du document. XMLHttpRequest plutôt que fetch : seul lui donne
+ * Envoi d'un formulaire multipart au BFF. XMLHttpRequest plutôt que fetch : seul lui donne
  * l'avancement de l'envoi. Renvoie l'identifiant de la tâche de traitement Paperless.
  */
-export function uploadVersion(
-  id: number,
-  file: File,
-  label: string,
-  onProgress: (fraction: number) => void = () => {},
-): Promise<string> {
-  const form = new FormData()
-  form.append('document', file, file.name)
-  if (label.trim()) form.append('version_label', label.trim())
+function sendFile(path: string, form: FormData, onProgress: (fraction: number) => void, signal?: AbortSignal): Promise<string> {
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest()
-    request.open('POST', `${documentPath(id)}/versions`)
+    request.open('POST', path)
     request.withCredentials = true
     request.setRequestHeader('Accept', 'application/json')
     for (const [name, value] of Object.entries(ANTI_FORGERY_HEADER)) request.setRequestHeader(name, value)
@@ -262,8 +254,30 @@ export function uploadVersion(
       else reject(new ApiError(request.status, body.title ?? `Envoi refusé (erreur ${request.status}).`, body.code ?? null))
     }
     request.onerror = () => reject(new TypeError('réseau'))
+    request.onabort = () => reject(new DOMException('Envoi annulé.', 'AbortError'))
+    signal?.addEventListener('abort', () => request.abort(), { once: true })
     request.send(form)
   })
+}
+
+/** Envoie une nouvelle version du document ; renvoie la tâche de traitement Paperless. */
+export function uploadVersion(
+  id: number,
+  file: File,
+  label: string,
+  onProgress: (fraction: number) => void = () => {},
+): Promise<string> {
+  const form = new FormData()
+  form.append('document', file, file.name)
+  if (label.trim()) form.append('version_label', label.trim())
+  return sendFile(`${documentPath(id)}/versions`, form, onProgress)
+}
+
+/** Ajoute un document (PWA-07) ; Paperless le consomme en tâche de fond (OCR, classement). */
+export function uploadDocument(file: File, onProgress: (fraction: number) => void = () => {}, signal?: AbortSignal) {
+  const form = new FormData()
+  form.append('document', file, file.name)
+  return sendFile('/api/documents/upload', form, onProgress, signal)
 }
 
 export type TaskStatus = 'pending' | 'started' | 'success' | 'failure' | 'revoked'
