@@ -273,10 +273,29 @@ export function uploadVersion(
   return sendFile(`${documentPath(id)}/versions`, form, onProgress)
 }
 
+/** Métadonnées facultatives d'un ajout (SCAN-06), appliquées par Paperless à la création du document. */
+export interface UploadMetadata {
+  title?: string
+  tags?: number[]
+  /** Valeurs de champs personnalisés : identifiant du champ → valeur. */
+  customFields?: Record<number, unknown>
+}
+
 /** Ajoute un document (PWA-07) ; Paperless le consomme en tâche de fond (OCR, classement). */
-export function uploadDocument(file: File, onProgress: (fraction: number) => void = () => {}, signal?: AbortSignal) {
+export function uploadDocument(
+  file: File,
+  onProgress: (fraction: number) => void = () => {},
+  signal?: AbortSignal,
+  metadata: UploadMetadata = {},
+) {
   const form = new FormData()
   form.append('document', file, file.name)
+  const title = metadata.title?.trim()
+  if (title) form.append('title', title)
+  for (const tag of metadata.tags ?? []) form.append('tags', String(tag))
+  // post_document accepte un objet JSON « identifiant du champ → valeur ».
+  if (metadata.customFields && Object.keys(metadata.customFields).length > 0)
+    form.append('custom_fields', JSON.stringify(metadata.customFields))
   return sendFile('/api/documents/upload', form, onProgress, signal)
 }
 

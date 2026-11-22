@@ -1082,6 +1082,26 @@ public sealed class DocumentEndpointsTests(AuthAppFixture fixture) : IClassFixtu
     }
 
     [Fact]
+    public async Task Ajout_de_document_relaye_titre_etiquettes_et_champs_personnalises()
+    {
+        var cookie = await LoginAsync();
+        using var form = PdfForm("scan.pdf");
+        form.Add(new StringContent("Facture EDF"), "title");
+        form.Add(new StringContent("3"), "tags");
+        form.Add(new StringContent("7"), "tags");
+        form.Add(new StringContent("""{"2":"opt-k"}"""), "custom_fields");
+
+        using var response = await SendAsync(HttpMethod.Post, "/api/documents/upload", cookie, form);
+
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+        var body = fixture.Paperless.LastBody;
+        Assert.Contains("name=title\r\n\r\nFacture EDF\r\n", body, StringComparison.Ordinal);
+        Assert.Contains("name=tags\r\n\r\n3\r\n", body, StringComparison.Ordinal);
+        Assert.Contains("name=tags\r\n\r\n7\r\n", body, StringComparison.Ordinal);
+        Assert.Contains("""name=custom_fields""" + "\r\n\r\n" + """{"2":"opt-k"}""", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Ajout_de_document_exige_un_envoi_de_fichier()
     {
         var cookie = await LoginAsync();

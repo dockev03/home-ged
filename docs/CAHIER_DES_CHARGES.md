@@ -111,7 +111,7 @@ Les codes reprennent la grille de fonctionnalités validée (`FCT_HGED.xlsx`).
 | SCAN-05 | Assemblage en un seul PDF côté client, puis envoi à Paperless (qui fait l'OCR) | V1 |
 | SCAN-06 | Saisie optionnelle avant envoi : titre, personne, tags | V1 |
 
-Traitement **100 % côté navigateur** (OpenCV.js / jscanify et pdf-lib) : aucune image intermédiaire stockée sur le serveur.
+Traitement **100 % côté navigateur** (OpenCV.js / jscanify, et générateur PDF maison) : aucune image intermédiaire stockée sur le serveur. Le PDF intègre les pages JPEG telles quelles (sans recompression) ; pdf-lib, envisagé au départ, n'est plus maintenu depuis 2021.
 
 #### F-SHARE — Liens de partage protégés (G3)
 
@@ -164,7 +164,7 @@ ged.<domaine>   paperless.<domaine>
 |---|---|
 | Front | **Vue 3** + TypeScript + Vite, Vue Router, Pinia, `vite-plugin-pwa` (Workbox) |
 | UI | **Bootstrap 5** (MIT), même base que l'interface Paperless pour un rendu proche |
-| Scan | OpenCV.js / jscanify (bords et perspective), pdf-lib (assemblage PDF) |
+| Scan | OpenCV.js / jscanify (bords et perspective), générateur PDF maison (assemblage des pages JPEG, sans dépendance) |
 | Back | **ASP.NET Core (.NET 10 LTS)**, API minimales, pattern BFF |
 | Données | PostgreSQL (base `homeged` dédiée, même instance que Paperless), EF Core |
 | Client Paperless | `HttpClient` typé, version d'API figée via l'en-tête `Accept` |
