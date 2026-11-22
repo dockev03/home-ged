@@ -40,6 +40,13 @@ export const useReferencesStore = defineStore('references', () => {
   const types = computed(() => byId(lists.value.types))
   const chemins = computed(() => byId(lists.value.chemins))
 
+  /** Ajoute un élément créé à la volée, à sa place dans l'ordre alphabétique. */
+  function add<K extends keyof References>(kind: K, item: References[K][number]) {
+    const items = [...lists.value[kind], item] as References[K]
+    items.sort((a, b) => a.name.localeCompare(b.name, 'fr'))
+    lists.value = { ...lists.value, [kind]: items }
+  }
+
   /** Oublie les listes (déconnexion : un autre utilisateur n'a pas les mêmes droits). */
   function reset() {
     lists.value = { ...EMPTY }
@@ -47,5 +54,5 @@ export const useReferencesStore = defineStore('references', () => {
     loading = null
   }
 
-  return { lists, error, tags, correspondants, types, chemins, ensureLoaded, reset }
+  return { lists, error, tags, correspondants, types, chemins, ensureLoaded, add, reset }
 })

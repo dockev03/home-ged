@@ -10,6 +10,7 @@ import { fromQuery, toApiParams, toQuery, type DocumentFilters } from '../filter
 import { formatShortDate } from '../format/dates'
 import { parseHighlights } from '../format/highlights'
 import { useAuthStore } from '../stores/auth'
+import { useDocumentListStore } from '../stores/documentList'
 import { usePreferencesStore, type DisplayChoice } from '../stores/preferences'
 import { useReferencesStore } from '../stores/references'
 
@@ -21,6 +22,7 @@ const router = useRouter()
 const auth = useAuthStore()
 const preferences = usePreferencesStore()
 const references = useReferencesStore()
+const list = useDocumentListStore()
 const mobile = useMediaQuery(MOBILE_QUERY)
 
 const filters = computed(() => fromQuery(route.query))
@@ -64,6 +66,7 @@ async function load(target: number, append: boolean) {
     documents.value = append ? [...documents.value, ...result.results] : result.results
     count.value = result.count
     loadedPage.value = target
+    list.remember(route.query, result.all ?? [])
   } catch (e) {
     if (current !== generation) return
     // Page hors limites (documents supprimés entre-temps) : retour à la première.
@@ -172,7 +175,9 @@ onMounted(() => {
       <li v-for="doc in documents" :key="doc.id" class="card h-100" :data-document="doc.id">
         <img class="card-img-top apercu" :src="thumbnailUrl(doc.id)" alt="" loading="lazy" />
         <div class="card-body p-2">
-          <p class="card-title titre mb-1">{{ doc.title }}</p>
+          <p class="card-title titre mb-1">
+            <RouterLink :to="{ name: 'document', params: { id: doc.id } }" class="stretched-link lien">{{ doc.title }}</RouterLink>
+          </p>
           <div class="etiquettes"><TagBadge v-for="tag in tagsOf(doc)" :key="tag.id" :tag="tag" /></div>
           <small class="text-body-secondary">{{ formatShortDate(doc.created) }}</small>
         </div>
@@ -189,7 +194,7 @@ onMounted(() => {
               <span v-if="nameOf(references.correspondants, doc.correspondent)" class="text-body-secondary">
                 {{ nameOf(references.correspondants, doc.correspondent) }} :
               </span>
-              {{ doc.title }}
+              <RouterLink :to="{ name: 'document', params: { id: doc.id } }" class="stretched-link lien">{{ doc.title }}</RouterLink>
             </p>
             <div class="etiquettes mb-1"><TagBadge v-for="tag in tagsOf(doc)" :key="tag.id" :tag="tag" /></div>
             <p v-if="highlights(doc)" class="extrait small mb-1">
@@ -226,7 +231,9 @@ onMounted(() => {
           <tr v-for="doc in documents" :key="doc.id" :data-document="doc.id">
             <td>{{ doc.archive_serial_number ?? '' }}</td>
             <td>{{ nameOf(references.correspondants, doc.correspondent) ?? '' }}</td>
-            <td class="titre">{{ doc.title }}</td>
+            <td class="titre">
+              <RouterLink :to="{ name: 'document', params: { id: doc.id } }" class="lien">{{ doc.title }}</RouterLink>
+            </td>
             <td><div class="etiquettes"><TagBadge v-for="tag in tagsOf(doc)" :key="tag.id" :tag="tag" /></div></td>
             <td>{{ nameOf(references.types, doc.document_type) ?? '' }}</td>
             <td class="text-nowrap">{{ formatShortDate(doc.created) }}</td>
@@ -291,6 +298,16 @@ onMounted(() => {
 .titre {
   font-weight: 600;
   overflow-wrap: anywhere;
+}
+
+.lien {
+  color: inherit;
+  text-decoration: none;
+}
+
+.lien:hover,
+.lien:focus-visible {
+  text-decoration: underline;
 }
 
 .etiquettes {

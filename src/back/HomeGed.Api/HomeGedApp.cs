@@ -74,6 +74,7 @@ public static class HomeGedApp
         builder.Services.AddSingleton<LoginThrottle>();
         builder.Services.AddSingleton<PaperlessTokenProtector>();
         builder.Services.AddScoped<ISessionStore, EfSessionStore>();
+        builder.Services.AddScoped<PaperlessRelay>();
         builder.Services.AddHostedService<SessionCleanupService>();
         builder.Services.AddAuthentication(SessionAuthenticationHandler.SchemeName)
             .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, SessionAuthenticationHandler>(

@@ -116,6 +116,7 @@ onBeforeUnmount(() => document.body.classList.remove('overflow-hidden'))
                 class="nav-link"
                 :active-class="item.to === 'accueil' ? '' : 'active'"
                 exact-active-class="active"
+                :class="{ active: item.to === 'documents' && route.name === 'document' }"
                 :to="{ name: item.to }"
               >
                 {{ item.label }}

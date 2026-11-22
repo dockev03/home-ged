@@ -5,6 +5,7 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 import FilterBar from '../components/FilterBar.vue'
 import { defaultFilters } from '../filters/documentFilters'
 import { useAuthStore } from '../stores/auth'
+import { useDocumentListStore } from '../stores/documentList'
 import { usePreferencesStore } from '../stores/preferences'
 import DocumentsView from './DocumentsView.vue'
 
@@ -56,7 +57,10 @@ const documentCalls = (fetchMock: ReturnType<typeof stubBff>) =>
 async function mountView(path = '/documents') {
   const router = createRouter({
     history: createMemoryHistory(),
-    routes: [{ path: '/documents', name: 'documents', component: DocumentsView }],
+    routes: [
+      { path: '/documents', name: 'documents', component: DocumentsView },
+      { path: '/documents/:id', name: 'document', component: { template: '<p>fiche</p>' } },
+    ],
   })
   await router.push(path)
   const wrapper = mount({ template: '<RouterView />' }, { global: { plugins: [router] } })
@@ -96,6 +100,23 @@ describe('DocumentsView', () => {
     expect(wrapper.text()).toContain('EDF')
     expect(wrapper.find('.badge.etiquette').text()).toBe('Banque')
     expect(wrapper.find('img').attributes('src')).toBe('/api/documents/1/thumb')
+    expect(wrapper.find('[data-document="1"] a').attributes('href')).toBe('/documents/1')
+  })
+
+  it('mémorise la liste pour précédent / suivant de la fiche', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) =>
+      String(input).startsWith('/api/documents')
+        ? Response.json({ count: 3, all: [7, 3, 9], results: [doc(7), doc(3), doc(9)] })
+        : Response.json([]),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await mountView('/documents?q=edf')
+
+    const list = useDocumentListStore()
+    expect(list.query).toEqual({ q: 'edf' })
+    expect(list.neighbours(3)).toEqual({ previous: 7, next: 9, position: { index: 2, total: 3 } })
+    expect(list.neighbours(7).previous).toBeNull()
   })
 
   it("un nouveau filtre remplace l'URL et repart de la première page", async () => {
