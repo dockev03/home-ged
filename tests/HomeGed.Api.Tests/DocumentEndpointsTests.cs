@@ -38,6 +38,9 @@ internal static class FakePaperlessDocuments
             case "/api/documents/bulk_edit/" when token == "tok-bob":
                 return FakePaperless.Json(HttpStatusCode.Forbidden, """{"detail":"Insufficient permissions"}""");
 
+            case "/api/documents/bulk_edit/" when body!.Contains("\"documents\":[9]", StringComparison.Ordinal):
+                return FakePaperless.Json(HttpStatusCode.OK, """{"result":"OK","task_id":"3f2504e0-4f89-11d3-9a0c-0305e82c3309"}""");
+
             case "/api/documents/bulk_edit/":
                 return FakePaperless.Json(HttpStatusCode.OK, """{"result":"OK"}""");
 
@@ -1024,4 +1027,28 @@ public sealed class DocumentEndpointsTests(AuthAppFixture fixture) : IClassFixtu
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Equal(calls, fixture.Paperless.Calls);
     }
+
+    [Fact]
+    public async Task Action_en_masse_en_tache_de_fond_renvoie_la_tache()
+    {
+        var cookie = await LoginAsync();
+
+        using var response = await SendAsync(HttpMethod.Post, "/api/documents/actions", cookie, """
+            {"documents":[9],"method":"delete"}
+            """);
+
+        Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+        var body = JsonElement.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(Guid.Parse("3f2504e0-4f89-11d3-9a0c-0305e82c3309"), body.GetProperty("tache").GetGuid());
+    }
+
+    [Theory]
+    [InlineData("\"3f2504e0-4f89-11d3-9a0c-0305e82c3309\"", true)]
+    [InlineData("""{"task_id":"3f2504e0-4f89-11d3-9a0c-0305e82c3309"}""", true)]
+    [InlineData("""{"result":"OK"}""", false)]
+    [InlineData("""{"task_id":"pas-un-guid"}""", false)]
+    [InlineData("OK", false)]
+    [InlineData("", false)]
+    public void Tache_d_action_en_masse_lue_dans_les_deux_formats(string body, bool found) =>
+        Assert.Equal(found, DocumentEndpoints.BulkTask(body).HasValue);
 }

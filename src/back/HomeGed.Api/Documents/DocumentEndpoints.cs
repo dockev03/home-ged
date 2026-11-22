@@ -2,6 +2,7 @@ using System.Collections.Frozen;
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using HomeGed.Api.Hosting;
 
@@ -180,7 +181,7 @@ public static class DocumentEndpoints
     /// <summary>
     /// Action en masse (UI-06) : Paperless vérifie les droits de l'utilisateur sur chaque document
     /// et refuse l'ensemble si l'un d'eux n'est pas modifiable. Une suppression place les documents
-    /// dans la corbeille de Paperless.
+    /// dans la corbeille de Paperless. Réponse 202 avec la tâche quand Paperless l'exécute en fond.
     /// </summary>
     private static async Task<IResult> BulkEditAsync(
         JsonNode? body, HttpContext context, PaperlessRelay relay, CancellationToken cancellationToken)
@@ -193,7 +194,9 @@ public static class DocumentEndpoints
 
         return (await relay.SendAsync(
             context, HttpMethod.Post, "api/documents/bulk_edit/", request,
-            (_, _) => Task.FromResult<IResult?>(TypedResults.NoContent()),
+            async (response, ct) => BulkTask(await response.Content.ReadAsStringAsync(ct)) is { } task
+                ? TypedResults.Json(new { tache = task }, statusCode: StatusCodes.Status202Accepted)
+                : TypedResults.NoContent(),
             cancellationToken,
             onError: status => status == HttpStatusCode.Forbidden
                 ? PaperlessRelay.Problem(
@@ -201,6 +204,24 @@ public static class DocumentEndpoints
                     "Vous n'avez pas le droit de faire cette action sur tous les documents sélectionnés : aucun n'a été modifié.",
                     "acces_refuse")
                 : null))!;
+    }
+
+    /// <summary>
+    /// Paperless 3.5 exécute l'action en tâche de fond : identifiant de la tâche (chaîne seule ou
+    /// champ <c>task_id</c>), pour que l'écran attende la fin avant de recharger la liste.
+    /// </summary>
+    internal static Guid? BulkTask(string body)
+    {
+        try
+        {
+            var node = JsonNode.Parse(body);
+            var id = node is JsonObject obj ? obj["task_id"] : node;
+            return id is JsonValue v && v.TryGetValue<string>(out var text) && Guid.TryParse(text, out var task) ? task : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     /// <summary>Archive zip des documents sélectionnés, relayée en flux (UI-06).</summary>

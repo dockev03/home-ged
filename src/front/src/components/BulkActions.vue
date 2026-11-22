@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import {
   bulkDownload,
   bulkEdit,
+  getTask,
   listGroups,
   listUsers,
   type ArchiveContent,
@@ -175,6 +176,23 @@ function saveFile(blob: Blob, fileName: string) {
   setTimeout(() => URL.revokeObjectURL(url), 60_000)
 }
 
+/** Suivi de la tâche de fond de Paperless : une seconde entre deux lectures, 30 s au plus. */
+const POLL_MS = 1000
+const MAX_POLLS = 30
+
+/** Attend la fin de l'action ; vrai si elle est terminée, faux si elle se poursuit encore. */
+async function waitForTask(task: string): Promise<boolean> {
+  for (let attempt = 0; attempt < MAX_POLLS; attempt++) {
+    const state = await getTask(task)
+    if (state.status === 'success') return true
+    if (state.status === 'failure' || state.status === 'revoked') {
+      throw new ApiError(500, state.message ? `Paperless a échoué : ${state.message}` : 'Paperless a échoué.', 'tache_echouee')
+    }
+    await new Promise((resolve) => setTimeout(resolve, POLL_MS))
+  }
+  return false
+}
+
 async function apply() {
   if (busy.value || incomplete.value || n.value === 0) return
   busy.value = true
@@ -189,12 +207,11 @@ async function apply() {
     } else {
       const bulk = action()
       if (!bulk) return
-      await bulkEdit(documents, bulk)
-      emit(
-        'applied',
-        bulk.method === 'delete' ? `${label} placé${documents.length > 1 ? 's' : ''} dans la corbeille.` : `${label} modifié${documents.length > 1 ? 's' : ''}.`,
-        true,
-      )
+      const queued = await bulkEdit(documents, bulk)
+      const done = queued ? await waitForTask(queued.tache) : true
+      const plural = documents.length > 1 ? 's' : ''
+      const message = bulk.method === 'delete' ? `${label} placé${plural} dans la corbeille.` : `${label} modifié${plural}.`
+      emit('applied', done ? message : `${message.slice(0, -1)} : Paperless termine le traitement, actualisez dans un instant.`, true)
     }
     dialog.value = null
   } catch (e) {

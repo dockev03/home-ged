@@ -305,9 +305,12 @@ export type BulkAction =
     }
   | { method: 'delete'; parameters: Record<string, never> }
 
-/** Applique l'action à tous les documents ; Paperless refuse l'ensemble si l'un n'est pas modifiable. */
+/**
+ * Applique l'action à tous les documents ; Paperless refuse l'ensemble si l'un n'est pas modifiable.
+ * Renvoie la tâche de fond de Paperless quand il exécute l'action en différé (Paperless 3.5).
+ */
 export const bulkEdit = (documents: number[], action: BulkAction) =>
-  sendJson('POST', '/api/documents/actions', { documents, ...action })
+  sendJson<{ tache: string } | null>('POST', '/api/documents/actions', { documents, ...action })
 
 /** Contenu de l'archive : PDF d'archive (OCR), fichiers d'origine, ou les deux. */
 export type ArchiveContent = 'archive' | 'originaux' | 'les_deux'

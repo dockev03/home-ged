@@ -206,11 +206,20 @@ describe('DocumentsView', () => {
 
   describe('sélection multiple et actions en masse (UI-06)', () => {
     /** Faux BFF complet : identifiants de tous les résultats et routes des actions en masse. */
-    function stubActions(count: number, actions: { status?: number; body?: unknown } = {}) {
+    function stubActions(
+      count: number,
+      actions: { status?: number; body?: unknown; task?: { status: string; message: string | null } } = {},
+    ) {
       const base = stubBff(count).getMockImplementation()!
       const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(async (input) => {
         const url = new URL(String(input), 'http://localhost')
         if (url.pathname === '/api/documents/ids') return Response.json(Array.from({ length: count }, (_, i) => i + 1))
+        if (url.pathname === '/api/taches/3f2504e0-4f89-11d3-9a0c-0305e82c3309') {
+          return Response.json({ ...actions.task, document_id: null })
+        }
+        if (url.pathname === '/api/documents/actions' && actions.task) {
+          return Response.json({ tache: '3f2504e0-4f89-11d3-9a0c-0305e82c3309' }, { status: 202 })
+        }
         if (url.pathname === '/api/documents/actions') {
           return actions.status
             ? Response.json(actions.body ?? {}, { status: actions.status })
@@ -294,6 +303,37 @@ describe('DocumentsView', () => {
 
       expect(posts(fetchMock, '/api/documents/actions')).toEqual([{ documents: [1, 3], method: 'delete', parameters: {} }])
       expect(wrapper.find('.alert-success').text()).toContain('2 documents placés dans la corbeille.')
+    })
+
+    it("attend la fin de la tâche de fond de Paperless avant de recharger", async () => {
+      const fetchMock = stubActions(3, { task: { status: 'success', message: null } })
+      const { wrapper } = await mountView()
+      await wrapper.find('[data-document="1"] input[type="checkbox"]').setValue(true)
+      const loads = documentCalls(fetchMock).length
+
+      await openAction(wrapper, 'supprimer')
+      await confirm(wrapper, 'Supprimer').trigger('click')
+      await flushPromises()
+
+      const urls = fetchMock.mock.calls.map(([input]) => String(input))
+      const taskIndex = urls.indexOf('/api/taches/3f2504e0-4f89-11d3-9a0c-0305e82c3309')
+      expect(taskIndex).toBeGreaterThan(-1)
+      expect(urls.slice(taskIndex).some((u) => u.startsWith('/api/documents?'))).toBe(true)
+      expect(documentCalls(fetchMock).length).toBe(loads + 1)
+      expect(wrapper.find('.alert-success').text()).toContain('1 document placé dans la corbeille.')
+    })
+
+    it("affiche l'échec de la tâche de fond et garde la sélection", async () => {
+      stubActions(3, { task: { status: 'failure', message: 'Insufficient permissions' } })
+      const { wrapper } = await mountView()
+      await wrapper.find('[data-document="1"] input[type="checkbox"]').setValue(true)
+
+      await openAction(wrapper, 'supprimer')
+      await confirm(wrapper, 'Supprimer').trigger('click')
+      await flushPromises()
+
+      expect(wrapper.find('.modal [role="alert"]').text()).toContain('Paperless a échoué : Insufficient permissions')
+      expect(wrapper.find('[aria-label="Sélection"]').text()).toContain('1 sélectionné')
     })
 
     it('affiche le refus de Paperless dans la fenêtre et garde la sélection', async () => {
