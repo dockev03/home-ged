@@ -1,12 +1,23 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { ApiError } from '../api/http'
-import { isExhausted, listShares, revokeShare, shareUrl, type ShareLink } from '../api/shares'
+import {
+  getShareAccessLog,
+  isExhausted,
+  listShares,
+  revokeShare,
+  shareUrl,
+  type ShareAccess,
+  type ShareLink,
+} from '../api/shares'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import { copyText } from '../composables/clipboard'
 import { formatDate, formatDateTime, formatRelative } from '../format/dates'
 
-/** Mes liens (SHARE-04) : liens de partage actifs de l'utilisateur, révocables en un clic. */
+/**
+ * Mes liens (SHARE-04) : liens de partage actifs de l'utilisateur, révocables en un clic,
+ * avec le journal des tentatives d'ouverture de chacun (SHARE-05).
+ */
 const links = ref<ShareLink[] | null>(null)
 const loadError = ref<string | null>(null)
 const notice = ref<string | null>(null)
@@ -41,6 +52,28 @@ async function copy(link: ShareLink) {
   notice.value = null
   if (await copyText(shareUrl(link.id))) notice.value = `Lien vers « ${documentLabel(link)} » copié.`
   else actionError.value = `Copie impossible. Lien : ${shareUrl(link.id)}`
+}
+
+/** Journal affiché : lien concerné, puis ses entrées (null pendant le chargement). */
+const journalLink = ref<ShareLink | null>(null)
+const journal = ref<ShareAccess[] | null>(null)
+const journalError = ref<string | null>(null)
+
+async function showJournal(link: ShareLink) {
+  journalLink.value = link
+  journal.value = null
+  journalError.value = null
+  try {
+    const entries = await getShareAccessLog(link.id)
+    if (journalLink.value === link) journal.value = entries
+  } catch (e) {
+    if (journalLink.value === link) journalError.value = errorMessage(e)
+  }
+}
+
+function closeJournal() {
+  journalLink.value = null
+  journal.value = null
 }
 
 async function revoke() {
@@ -109,10 +142,55 @@ async function revoke() {
           </div>
           <div class="actions">
             <button type="button" class="btn btn-sm btn-outline-primary" @click="copy(link)">Copier le lien</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" @click="showJournal(link)">Journal</button>
             <button type="button" class="btn btn-sm btn-outline-danger" :disabled="busy" @click="revoking = link">Révoquer</button>
           </div>
         </li>
       </ul>
+    </template>
+
+    <template v-if="journalLink">
+      <div
+        class="modal d-block"
+        tabindex="-1"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="journal-titre"
+        @keydown.esc="closeJournal"
+        @click.self="closeJournal"
+      >
+        <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h2 id="journal-titre" class="modal-title fs-5 texte">Accès à « {{ documentLabel(journalLink) }} »</h2>
+              <button type="button" class="btn-close" aria-label="Fermer" @click="closeJournal" />
+            </div>
+            <div class="modal-body journal">
+              <div v-if="journalError" class="alert alert-danger mb-0" role="alert">{{ journalError }}</div>
+              <div v-else-if="journal === null" class="chargement">
+                <span class="spinner-border" role="status"><span class="visually-hidden">Chargement…</span></span>
+              </div>
+              <p v-else-if="journal.length === 0" class="mb-0 text-body-secondary">
+                Personne n'a encore essayé d'ouvrir ce lien.
+              </p>
+              <ul v-else class="list-group list-group-flush">
+                <li v-for="(entry, index) in journal" :key="index" class="list-group-item px-0 entree">
+                  <span class="badge" :class="entry.succes ? 'text-bg-success' : 'text-bg-danger'">
+                    {{ entry.succes ? 'Ouvert' : 'Refusé' }}
+                  </span>
+                  <span>{{ formatDateTime(entry.date) }}</span>
+                  <span class="text-body-secondary">{{ entry.ip ?? 'IP inconnue' }}</span>
+                  <span v-if="entry.navigateur" class="small text-body-secondary texte navigateur">{{ entry.navigateur }}</span>
+                </li>
+              </ul>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-outline-secondary" @click="closeJournal">Fermer</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-backdrop fade show" />
     </template>
 
     <ConfirmDialog
@@ -167,6 +245,17 @@ async function revoke() {
   .actions .btn {
     min-height: 44px;
   }
+}
+
+.entree {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.75rem;
+}
+
+.navigateur {
+  flex-basis: 100%;
 }
 
 .vide {

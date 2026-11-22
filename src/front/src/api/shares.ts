@@ -25,6 +25,16 @@ export interface NewShare {
   telechargementsMax: number | null
 }
 
+/** Tentative d'ouverture d'un lien (SHARE-05). */
+export interface ShareAccess {
+  date: string
+  ip: string | null
+  /** User-Agent du navigateur, tel que reçu. */
+  navigateur: string | null
+  /** Bon mot de passe et lien utilisable. */
+  succes: boolean
+}
+
 export const PASSWORD_MIN_LENGTH = 8
 export const PASSWORD_MAX_LENGTH = 128
 export const MAX_DOWNLOADS_LIMIT = 1000
@@ -36,6 +46,9 @@ export const listShares = () => getJson<{ results: ShareLink[] }>('/api/partages
 export const createShare = (share: NewShare) => sendJson<ShareLink>('POST', '/api/partages', share)
 
 export const revokeShare = (id: string) => sendJson('DELETE', `/api/partages/${encodeURIComponent(id)}`)
+
+export const getShareAccessLog = (id: string) =>
+  getJson<{ results: ShareAccess[] }>(`/api/partages/${encodeURIComponent(id)}/journal`).then((r) => r.results)
 
 /** Adresse publique du lien, à transmettre au destinataire (sans le mot de passe). */
 export const shareUrl = (id: string, origin: string = window.location.origin) => `${origin}/s/${id}`

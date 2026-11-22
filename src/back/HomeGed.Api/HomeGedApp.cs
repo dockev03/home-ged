@@ -84,6 +84,7 @@ public static class HomeGedApp
             .ValidateDataAnnotations()
             .ValidateOnStart();
         builder.Services.AddScoped<IShareLinkStore, EfShareLinkStore>();
+        builder.Services.AddSingleton<ShareTickets>();
         builder.Services.AddHostedService<ShareCleanupService>();
 
         builder.Services.AddAuthentication(SessionAuthenticationHandler.SchemeName)
@@ -111,6 +112,7 @@ public static class HomeGedApp
         configure?.Invoke(builder);
 
         var app = builder.Build();
+        PublicShareEndpoints.WarnIfNotConfigured(app);
 
         app.UseForwardedHeaders();
         if (!app.Environment.IsDevelopment())
@@ -137,6 +139,7 @@ public static class HomeGedApp
         api.MapDashboard();
         api.MapTrash();
         api.MapShares();
+        api.MapPublicShares();
         // Toute autre route /api/* : 404 JSON, jamais la page de l'application.
         api.Map("/{**rest}", () => Results.Problem(statusCode: (int)HttpStatusCode.NotFound)).AllowAnonymous();
 

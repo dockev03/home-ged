@@ -34,6 +34,13 @@ export const routes = [
     component: () => import('./views/LoginView.vue'),
     meta: { public: true },
   },
+  {
+    // Page publique d'un lien de partage (SHARE-03) : pour un destinataire sans compte.
+    path: '/s/:id',
+    name: 'partage-public',
+    component: () => import('./views/PublicShareView.vue'),
+    meta: { public: true },
+  },
   { path: '/:chemin(.*)*', name: 'introuvable', component: () => import('./views/NotFoundView.vue') },
 ]
 

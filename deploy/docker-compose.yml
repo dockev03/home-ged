@@ -156,6 +156,8 @@ services:
       Database__ConnectionString: Host=db;Database=homeged;Username=homeged;Password=${HOMEGED_DB_PASSWORD:?HOMEGED_DB_PASSWORD manquant}
       # Sous-réseau du réseau NPM : seul NPM peut fournir l'IP client (X-Forwarded-For).
       ReverseProxy__KnownNetworks__0: ${NPM_SUBNET:?NPM_SUBNET manquant}
+      # Compte de service Paperless en lecture seule des liens de partage (facultatif).
+      Share__ServiceToken: ${HOMEGED_SHARE_TOKEN:-}
     # Healthcheck fourni par l'image (/health). Conteneur durci : système de
     # fichiers en lecture seule, aucune capacité Linux, pas d'élévation de droits.
     read_only: true

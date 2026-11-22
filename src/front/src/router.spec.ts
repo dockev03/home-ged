@@ -23,6 +23,15 @@ describe('router', () => {
     expect(router.currentRoute.value.path).toBe('/autre')
   })
 
+  it('ouvre la page publique d’un lien sans session', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status: 401 })))
+
+    await router.push('/s/AAAAAAAAAAAAAAAAAAAAAA')
+
+    expect(router.currentRoute.value.name).toBe('partage-public')
+    expect(router.currentRoute.value.params.id).toBe('AAAAAAAAAAAAAAAAAAAAAA')
+  })
+
   it.each([
     ['/documents/3', '/documents/3'],
     ['//evil.example', '/'],

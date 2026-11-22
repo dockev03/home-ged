@@ -93,4 +93,66 @@ public sealed class ShareLinkStoreIntegrationTests : IAsyncLifetime, IDisposable
         Assert.Equal(new[] { recent.Id, active.Id }.Order(StringComparer.Ordinal), left.Order(StringComparer.Ordinal));
         Assert.Equal([active.Id], await _db.ShareAccessLog.AsNoTracking().Select(a => a.ShareLinkId).ToListAsync());
     }
+    [Fact]
+    public async Task Retrouve_un_lien_quel_que_soit_son_etat()
+    {
+        var link = NewLink(1);
+        await _store.AddAsync(link, CancellationToken.None);
+        await _store.RevokeAsync(link.Id, 1, Now, CancellationToken.None);
+
+        var found = await _store.FindAsync(link.Id, CancellationToken.None);
+
+        Assert.NotNull(found?.RevokedAt);
+        Assert.Null(await _store.FindAsync(ShareLinkIds.New(), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Compte_les_telechargements_sans_depasser_le_quota_meme_en_parallele()
+    {
+        var link = NewLink(1);
+        await _store.AddAsync(link, CancellationToken.None);
+
+        // Un contexte par requête, comme en production : des UPDATE réellement concurrents.
+        var results = await Task.WhenAll(Enumerable.Range(0, 8).Select(async _ =>
+        {
+            await using var db = new HomeGedDbContext(new DbContextOptionsBuilder<HomeGedDbContext>()
+                .UseNpgsql(IntegrationEnvironment.HomeGedDb).Options);
+            return await new EfShareLinkStore(db).TryCountDownloadAsync(link.Id, Now, CancellationToken.None);
+        }));
+
+        Assert.Equal(3, results.Count(r => r));
+        Assert.Equal(3, (await _store.FindAsync(link.Id, CancellationToken.None))!.DownloadCount);
+    }
+
+    [Fact]
+    public async Task Refuse_de_compter_un_telechargement_sur_un_lien_expire_ou_revoque()
+    {
+        var expired = NewLink(1, Now.AddDays(-8), Now);
+        var revoked = NewLink(1);
+        await _store.AddAsync(expired, CancellationToken.None);
+        await _store.AddAsync(revoked, CancellationToken.None);
+        await _store.RevokeAsync(revoked.Id, 1, Now, CancellationToken.None);
+
+        Assert.False(await _store.TryCountDownloadAsync(expired.Id, Now, CancellationToken.None));
+        Assert.False(await _store.TryCountDownloadAsync(revoked.Id, Now, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Journal_reserve_au_proprietaire_le_plus_recent_d_abord()
+    {
+        var link = NewLink(1);
+        await _store.AddAsync(link, CancellationToken.None);
+        await _store.LogAccessAsync(
+            new ShareAccessLog { ShareLinkId = link.Id, Timestamp = Now.AddMinutes(-1), Ip = "203.0.113.1", Success = false },
+            CancellationToken.None);
+        await _store.LogAccessAsync(
+            new ShareAccessLog { ShareLinkId = link.Id, Timestamp = Now, Ip = "203.0.113.2", UserAgent = "Firefox", Success = true },
+            CancellationToken.None);
+
+        var entries = await _store.ListAccessLogAsync(link.Id, 1, 10, CancellationToken.None);
+
+        Assert.Equal(["203.0.113.2", "203.0.113.1"], entries!.Select(e => e.Ip));
+        Assert.Single((await _store.ListAccessLogAsync(link.Id, 1, 1, CancellationToken.None))!);
+        Assert.Null(await _store.ListAccessLogAsync(link.Id, 2, 10, CancellationToken.None));
+    }
 }
