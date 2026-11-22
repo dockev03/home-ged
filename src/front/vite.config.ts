@@ -34,6 +34,8 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
+        // OpenCV (environ 10 Mo, écran Scanner seul) : téléchargé à la première utilisation, pas à l'installation.
+        globIgnores: ['**/opencv-*.js'],
         cleanupOutdatedCaches: true,
         // Navigation hors ligne vers l'application ; jamais pour l'API, les sondes ni les liens publics.
         navigateFallback: '/index.html',
@@ -42,6 +44,10 @@ export default defineConfig({
       },
     }),
   ],
+  // Worker de recadrage en module ES : OpenCV y est importé dynamiquement (fichier à part).
+  worker: {
+    format: 'es',
+  },
   server: {
     // En développement, le BFF .NET tourne sur le port 5080 (launchSettings.json).
     proxy: {
