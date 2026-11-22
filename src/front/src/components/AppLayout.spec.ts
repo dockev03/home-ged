@@ -218,4 +218,23 @@ describe('AppLayout', () => {
     window.dispatchEvent(busy)
     expect(busy.defaultPrevented).toBe(true)
   })
+
+  it('signale le mode hors ligne et les envois en attente (PWA-09, PWA-10)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('réseau')))
+    onTestFinished(() => {
+      useUploadsStore().reset()
+      Object.defineProperty(navigator, 'onLine', { value: true, configurable: true })
+      window.dispatchEvent(new Event('online'))
+      vi.unstubAllGlobals()
+    })
+    const { wrapper } = await mountLayout('/documents')
+    expect(wrapper.text()).not.toContain('Hors ligne')
+
+    Object.defineProperty(navigator, 'onLine', { value: false, configurable: true })
+    window.dispatchEvent(new Event('offline'))
+    useUploadsStore().add([new File(['%PDF'], 'scan.pdf', { type: 'application/pdf' })])
+    await flushPromises()
+
+    expect(wrapper.find('.etat-reseau').text()).toBe('Hors ligne · 1 envoi en attente')
+  })
 })

@@ -3,6 +3,8 @@ import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from
 import { useRoute, useRouter } from 'vue-router'
 import { listDocumentIds, listDocuments, thumbnailUrl, type DocumentSummary } from '../api/documents'
 import { ApiError } from '../api/http'
+import OfflineDocuments from '../components/OfflineDocuments.vue'
+import { isNetworkError } from '../offline/db'
 import type { SavedView } from '../api/savedViews'
 import BaseDropdown from '../components/BaseDropdown.vue'
 import BulkActions from '../components/BulkActions.vue'
@@ -50,6 +52,8 @@ const count = ref(0)
 const loadedPage = ref(0)
 const loading = ref(false)
 const error = ref<string | null>(null)
+/** Liste injoignable faute de réseau : les documents gardés sur l'appareil sont proposés (PWA-09). */
+const unreachable = ref(false)
 let generation = 0
 
 const pageCount = computed(() => Math.max(1, Math.ceil(count.value / PAGE_SIZE)))
@@ -71,6 +75,7 @@ async function load(target: number, append: boolean) {
   const current = ++generation
   loading.value = true
   error.value = null
+  unreachable.value = false
   try {
     const result = await listDocuments(
       toApiParams(filters.value, { page: target, pageSize: PAGE_SIZE, userId: auth.user?.id ?? null }),
@@ -88,6 +93,7 @@ async function load(target: number, append: boolean) {
       return
     }
     error.value = errorMessage(e)
+    unreachable.value = isNetworkError(e)
   } finally {
     if (current === generation) loading.value = false
   }
@@ -398,6 +404,7 @@ onMounted(() => {
         Réessayer
       </button>
     </div>
+    <OfflineDocuments v-if="unreachable && !documents.length" />
 
     <p v-if="loadedPage > 0 && !loading && !error && documents.length === 0" class="vide">
       Aucun document ne correspond à ces filtres.

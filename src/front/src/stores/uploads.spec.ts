@@ -2,7 +2,8 @@ import { flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MAX_UPLOAD_BYTES } from '../api/documents'
-import { POLL_MS, useUploadsStore } from './uploads'
+import { memoryBackend, offlineDb, setOfflineBackend } from '../offline/db'
+import { POLL_MS, RETRY_MS, useUploadsStore } from './uploads'
 
 const TASK = '3f2504e0-4f89-11d3-9a0c-0305e82c3302'
 
@@ -179,5 +180,136 @@ describe('store uploads', () => {
     expect(uploads.items.map((u) => u.status)).toEqual(['annule', 'annule'])
     uploads.clearFinished()
     expect(uploads.items).toHaveLength(0)
+  })
+})
+
+/** Connexion de l'appareil vue par le navigateur, avec l'événement correspondant. */
+function setOnline(online: boolean) {
+  Object.defineProperty(navigator, 'onLine', { value: online, configurable: true })
+  window.dispatchEvent(new Event(online ? 'online' : 'offline'))
+}
+
+const stored = async () => (await offlineDb.getAll<{ key: string; name: string; userId: number }>('envois')).map((r) => r.name)
+
+describe('store uploads hors ligne (PWA-10)', () => {
+  const ALICE = 1
+
+  beforeEach(() => {
+    setOfflineBackend(memoryBackend())
+    setActivePinia(createPinia())
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    setOnline(true)
+    setOfflineBackend(null)
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  })
+
+  it('hors ligne, garde le fichier sur l’appareil et l’envoie au retour du réseau', async () => {
+    setOnline(false)
+    const sent = stubXhr()
+    stubTask({ status: 'started' })
+    const uploads = useUploadsStore()
+    await uploads.restore(ALICE)
+
+    uploads.add([pdf('scan.pdf')], { title: 'Facture' })
+    await flushPromises()
+
+    expect(sent).toHaveLength(0)
+    expect(uploads.items[0]).toMatchObject({ status: 'reseau' })
+    expect(uploads.waiting).toBe(1)
+    expect(uploads.active).toBe(false)
+    expect(await stored()).toEqual(['scan.pdf'])
+
+    setOnline(true)
+    await flushPromises()
+
+    expect(sent).toHaveLength(1)
+    expect(sent[0]!.form.get('title')).toBe('Facture')
+    expect(uploads.items[0]!.status).toBe('traitement')
+    expect(await stored()).toEqual([])
+    uploads.reset()
+  })
+
+  it('reprend après une coupure pendant l’envoi, puis au délai de nouvel essai', async () => {
+    const sent = stubXhr({ hold: true })
+    stubTask({ status: 'started' })
+    const uploads = useUploadsStore()
+    await uploads.restore(ALICE)
+    uploads.add([pdf()])
+    await flushPromises()
+
+    sent[0]!.xhr.onerror?.()
+    await flushPromises()
+    expect(uploads.items[0]).toMatchObject({ status: 'reseau', progress: 0 })
+    expect(await stored()).toEqual(['facture.pdf'])
+
+    await vi.advanceTimersByTimeAsync(RETRY_MS)
+    expect(sent).toHaveLength(2)
+    sent[1]!.xhr.finish()
+    await flushPromises()
+    expect(uploads.items[0]!.status).toBe('traitement')
+    expect(await stored()).toEqual([])
+    uploads.reset()
+  })
+
+  it('retrouve les envois gardés à la réouverture de l’application', async () => {
+    setOnline(false)
+    stubXhr()
+    stubTask({ status: 'started' })
+    const before = useUploadsStore()
+    await before.restore(ALICE)
+    before.add([pdf('a.pdf'), pdf('b.pdf')])
+    await flushPromises()
+    before.reset()
+
+    // Application rouverte, toujours hors ligne : les fichiers attendent toujours.
+    setActivePinia(createPinia())
+    const after = useUploadsStore()
+    await after.restore(ALICE)
+    expect(after.items.map((u) => [u.name, u.status])).toEqual([
+      ['a.pdf', 'reseau'],
+      ['b.pdf', 'reseau'],
+    ])
+
+    // Un autre utilisateur ne les voit pas.
+    setActivePinia(createPinia())
+    const other = useUploadsStore()
+    await other.restore(2)
+    expect(other.items).toEqual([])
+  })
+
+  it('session expirée : l’envoi attend la reconnexion, sans être perdu', async () => {
+    stubXhr({ status: 401, body: '{"title":"Session expirée."}' })
+    const uploads = useUploadsStore()
+    await uploads.restore(ALICE)
+
+    uploads.add([pdf()])
+    await flushPromises()
+
+    expect(uploads.items[0]).toMatchObject({ status: 'reseau', message: 'Session expirée : l’envoi partira après reconnexion.' })
+    expect(await stored()).toEqual(['facture.pdf'])
+    uploads.reset()
+    expect(await stored()).toEqual(['facture.pdf'])
+  })
+
+  it('un refus du BFF ou une annulation retire le fichier de l’appareil', async () => {
+    stubXhr({ status: 403, body: '{"title":"Refusé."}' })
+    const uploads = useUploadsStore()
+    await uploads.restore(ALICE)
+    uploads.add([pdf('refuse.pdf')])
+    await flushPromises()
+    expect(uploads.items[0]!.status).toBe('echec')
+
+    setOnline(false)
+    uploads.add([pdf('annule.pdf')])
+    await flushPromises()
+    expect(await stored()).toEqual(['annule.pdf'])
+    uploads.cancel(uploads.items[1]!.id)
+    await flushPromises()
+
+    expect(uploads.items[1]!.status).toBe('annule')
+    expect(await stored()).toEqual([])
   })
 })

@@ -26,19 +26,28 @@ import ReferenceSelect from '../components/ReferenceSelect.vue'
 import ShareDialog from '../components/ShareDialog.vue'
 import TagPicker from '../components/TagPicker.vue'
 import { MOBILE_QUERY, useMediaQuery } from '../composables/mediaQuery'
-import { formatDate } from '../format/dates'
+import { formatDate, formatDateTime } from '../format/dates'
 import { diff, isDirty, toForm, validate, type DocumentForm } from '../documents/form'
+import { isNetworkError } from '../offline/db'
+import { forgetDocument, getOfflineDocument, getOfflineFile, rememberDocument } from '../offline/documents'
+import { useAuthStore } from '../stores/auth'
 import { useDocumentListStore } from '../stores/documentList'
+import { useNetworkStore } from '../stores/network'
 import { useOpenDocumentsStore } from '../stores/openDocuments'
 import { useReferencesStore } from '../stores/references'
 
-/** Fiche document (UI-04) et modification de ses détails (UI-05). */
+/**
+ * Fiche document (UI-04) et modification de ses détails (UI-05). Chaque fiche consultée est gardée
+ * sur l'appareil ; hors ligne, sa copie s'affiche en lecture seule (PWA-09).
+ */
 const route = useRoute()
 const router = useRouter()
 const list = useDocumentListStore()
 const references = useReferencesStore()
 const openDocuments = useOpenDocumentsStore()
 const mobile = useMediaQuery(MOBILE_QUERY)
+const auth = useAuthStore()
+const network = useNetworkStore()
 
 type Tab = 'details' | 'contenu' | 'metadonnees' | 'notes' | 'historique' | 'permissions' | 'versions'
 const TABS: { value: Tab; label: string }[] = [
@@ -50,6 +59,9 @@ const TABS: { value: Tab; label: string }[] = [
   { value: 'permissions', label: 'Permissions' },
   { value: 'versions', label: 'Versions' },
 ]
+
+/** Onglets lisibles hors ligne : les autres interrogent Paperless. */
+const OFFLINE_TABS: Tab[] = ['details', 'contenu', 'notes']
 
 const id = computed(() => Number(route.params.id))
 const doc = ref<DocumentDetail | null>(null)
@@ -64,7 +76,23 @@ const saved = ref(false)
 /** Version affichée dans l'aperçu ; null = la version actuelle. */
 const previewVersion = ref<number | null>(null)
 
-const canEdit = computed(() => doc.value?.user_can_change !== false)
+/** Copie hors ligne affichée : date d'enregistrement et fichiers gardés (adresses blob:). */
+interface OfflineCopy {
+  savedAt: string
+  preview: string | null
+  thumbnail: string | null
+}
+const offlineCopy = ref<OfflineCopy | null>(null)
+
+function dropOfflineCopy() {
+  if (offlineCopy.value?.preview) URL.revokeObjectURL(offlineCopy.value.preview)
+  if (offlineCopy.value?.thumbnail) URL.revokeObjectURL(offlineCopy.value.thumbnail)
+  offlineCopy.value = null
+}
+onBeforeUnmount(dropOfflineCopy)
+
+const visibleTabs = computed(() => (offlineCopy.value ? TABS.filter((t) => OFFLINE_TABS.includes(t.value)) : TABS))
+const canEdit = computed(() => !offlineCopy.value && doc.value?.user_can_change !== false)
 const dirty = computed(() => !!original.value && !!form.value && isDirty(original.value, form.value))
 const neighbours = computed(() => list.neighbours(id.value))
 const listRoute = computed<RouteLocationRaw>(() => ({ name: 'documents', query: list.query }))
@@ -72,12 +100,36 @@ const listRoute = computed<RouteLocationRaw>(() => ({ name: 'documents', query: 
 const errorMessage = (e: unknown) =>
   e instanceof ApiError ? e.message : 'Impossible de joindre Home-GED. Vérifiez votre connexion.'
 
-function show(document: DocumentDetail) {
+function show(document: DocumentDetail, remember = true) {
   doc.value = document
   openDocuments.open({ id: document.id, title: document.title })
   original.value = toForm(document)
   form.value = toForm(document)
+  if (remember && auth.user && !auth.offline) void rememberDocument(auth.user.id, document)
 }
+
+/** Affiche la copie gardée sur l'appareil ; faux s'il n'y en a pas. */
+async function showOffline(requested: number): Promise<boolean> {
+  const copy = auth.user ? await getOfflineDocument(auth.user.id, requested) : null
+  if (!copy) return false
+  const [preview, thumbnail] = await Promise.all([
+    copy.files.includes('apercu') ? getOfflineFile(requested, 'apercu') : null,
+    copy.files.includes('vignette') ? getOfflineFile(requested, 'vignette') : null,
+  ])
+  if (requested !== id.value) return true
+  dropOfflineCopy()
+  offlineCopy.value = {
+    savedAt: copy.savedAt,
+    preview: preview ? URL.createObjectURL(preview) : null,
+    thumbnail: thumbnail ? URL.createObjectURL(thumbnail) : null,
+  }
+  if (!OFFLINE_TABS.includes(tab.value)) tab.value = 'details'
+  show(copy.document, false)
+  notes.value = copy.document.notes ?? []
+  return true
+}
+
+const OFFLINE_MISSING = 'Hors ligne : ce document n’a pas été ouvert récemment sur cet appareil, il n’est pas disponible.'
 
 async function load() {
   const requested = id.value
@@ -90,6 +142,11 @@ async function load() {
   previewVersion.value = null
   suggestions.value = null
   suggestError.value = null
+  dropOfflineCopy()
+  if (!network.online || auth.offline) {
+    if (!(await showOffline(requested)) && requested === id.value) loadError.value = OFFLINE_MISSING
+    return
+  }
   try {
     const document = await getDocument(requested)
     if (requested !== id.value) return
@@ -97,7 +154,14 @@ async function load() {
     notes.value = document.notes ?? []
   } catch (e) {
     if (requested !== id.value) return
-    if (e instanceof ApiError && e.status === 404) openDocuments.close(requested)
+    if (isNetworkError(e)) {
+      if (!(await showOffline(requested)) && requested === id.value) loadError.value = OFFLINE_MISSING
+      return
+    }
+    if (e instanceof ApiError && e.status === 404) {
+      openDocuments.close(requested)
+      void forgetDocument(requested)
+    }
     loadError.value = e instanceof ApiError && e.status === 404 ? 'Ce document n’existe pas ou ne vous est pas accessible.' : errorMessage(e)
   }
 }
@@ -110,6 +174,14 @@ onMounted(() => {
   void references.ensureLoaded()
   void load()
 })
+
+// Retour du réseau (et session revérifiée) : la copie hors ligne laisse place au document à jour.
+watch(
+  () => network.online && !auth.offline,
+  (reachable) => {
+    if (reachable && offlineCopy.value) void load()
+  },
+)
 
 /**
  * Rechargement après un changement de versions : le document (versions, contenu) est relu, le
@@ -194,6 +266,7 @@ async function remove() {
   deleting.value = true
   try {
     await deleteDocument(doc.value.id)
+    void forgetDocument(doc.value.id)
     list.forget(doc.value.id)
     openDocuments.close(doc.value.id)
     confirmingDelete.value = false
@@ -314,23 +387,39 @@ const goTo = (target: number | null) => target !== null && router.push({ name: '
               ›
             </button>
           </div>
-          <BaseDropdown end button-class="btn btn-outline-secondary">
+          <BaseDropdown v-if="!offlineCopy" end button-class="btn btn-outline-secondary">
             <template #toggle>Télécharger</template>
             <a v-if="doc.archived_file_name" class="dropdown-item" role="menuitem" :href="downloadUrl(doc.id)" download>
               Version archivée (PDF/A)
             </a>
             <a class="dropdown-item" role="menuitem" :href="downloadUrl(doc.id, true)" download>Fichier original</a>
           </BaseDropdown>
-          <button type="button" class="btn btn-outline-secondary" @click="sharing = true">Envoyer</button>
+          <button v-if="!offlineCopy" type="button" class="btn btn-outline-secondary" @click="sharing = true">Envoyer</button>
           <button v-if="canEdit" type="button" class="btn btn-outline-danger" @click="confirmingDelete = true">
             Supprimer
           </button>
         </div>
       </header>
 
+      <div v-if="offlineCopy" class="alert alert-warning mb-0" role="status">
+        Hors ligne : copie enregistrée sur cet appareil le {{ formatDateTime(offlineCopy.savedAt) }}, en lecture seule.
+      </div>
+
       <div class="corps">
         <section class="apercu" aria-label="Aperçu">
-          <template v-if="mobile">
+          <template v-if="offlineCopy">
+            <template v-if="mobile">
+              <a v-if="offlineCopy.preview" :href="offlineCopy.preview" target="_blank" rel="noopener" class="apercu-mobile">
+                <img v-if="offlineCopy.thumbnail" :src="offlineCopy.thumbnail" alt="" />
+                <span class="btn btn-outline-primary">Ouvrir l'aperçu</span>
+              </a>
+              <img v-else-if="offlineCopy.thumbnail" :src="offlineCopy.thumbnail" alt="" class="vignette-seule" />
+              <p v-else class="text-body-secondary mb-0">Aperçu non disponible hors ligne.</p>
+            </template>
+            <iframe v-else-if="offlineCopy.preview" :src="offlineCopy.preview" :title="`Aperçu de ${doc.title}`" class="cadre" />
+            <p v-else class="text-body-secondary mb-0">Aperçu non disponible hors ligne.</p>
+          </template>
+          <template v-else-if="mobile">
             <a :href="previewUrl(doc.id, previewVersion)" target="_blank" rel="noopener" class="apercu-mobile">
               <img :src="thumbnailUrl(doc.id)" alt="" />
               <span class="btn btn-outline-primary">Ouvrir l'aperçu</span>
@@ -341,7 +430,7 @@ const goTo = (target: number | null) => target !== null && router.push({ name: '
 
         <section class="onglets">
           <ul class="nav nav-tabs flex-nowrap flex-lg-wrap mb-3 onglets-liste" role="tablist">
-            <li v-for="t in TABS" :key="t.value" class="nav-item" role="presentation">
+            <li v-for="t in visibleTabs" :key="t.value" class="nav-item" role="presentation">
               <button
                 :id="`onglet-${t.value}`"
                 type="button"
@@ -359,8 +448,8 @@ const goTo = (target: number | null) => target !== null && router.push({ name: '
 
           <div :id="`panneau-${tab}`" role="tabpanel" :aria-labelledby="`onglet-${tab}`">
             <div v-if="tab === 'details'" class="details" @keydown.enter="onEnter">
-              <p v-if="!canEdit" class="alert alert-info">Vous pouvez consulter ce document, pas le modifier.</p>
-              <div v-else class="span-2 suggestions">
+              <p v-if="!canEdit && !offlineCopy" class="alert alert-info">Vous pouvez consulter ce document, pas le modifier.</p>
+              <div v-else-if="canEdit" class="span-2 suggestions">
                 <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="suggesting" @click="suggest">
                   <span v-if="suggesting" class="spinner-border spinner-border-sm me-1" aria-hidden="true" />
                   Suggérer
@@ -526,6 +615,7 @@ const goTo = (target: number | null) => target !== null && router.push({ name: '
   text-decoration: none;
 }
 
+.vignette-seule,
 .apercu-mobile img {
   width: 6rem;
   aspect-ratio: 3 / 4;

@@ -4,7 +4,8 @@ import { useUploadsStore, type Upload, type UploadStatus } from '../stores/uploa
 
 /**
  * Suivi des envois (PWA-07) : avancement de chaque fichier, puis traitement par Paperless (OCR,
- * classement) jusqu'au document créé. En bas à droite sur PC, en tête du contenu sur mobile.
+ * classement) jusqu'au document créé. Hors ligne, les fichiers attendent le réseau sur l'appareil
+ * (PWA-10). En bas à droite sur PC, en tête du contenu sur mobile.
  */
 defineProps<{ floating?: boolean }>()
 
@@ -13,6 +14,7 @@ const collapsed = ref(false)
 
 const LABELS: Record<UploadStatus, string> = {
   attente: 'En attente',
+  reseau: 'En attente du réseau',
   envoi: 'Envoi',
   traitement: 'Traitement par Paperless…',
   termine: 'Ajouté',
@@ -20,11 +22,18 @@ const LABELS: Record<UploadStatus, string> = {
   annule: 'Annulé',
 }
 
-const running = computed(() => uploads.items.filter((u) => ['attente', 'envoi', 'traitement'].includes(u.status)).length)
+const running = computed(
+  () => uploads.items.filter((u) => ['attente', 'reseau', 'envoi', 'traitement'].includes(u.status)).length,
+)
+/** Envois gardés sur l'appareil en attendant le réseau (PWA-10). */
+const offline = computed(() => uploads.items.filter((u) => u.status === 'reseau').length)
+const plural = (n: number) => (n > 1 ? 's' : '')
 const summary = computed(() =>
-  running.value
-    ? `${running.value} envoi${running.value > 1 ? 's' : ''} en cours`
-    : `${uploads.items.length} envoi${uploads.items.length > 1 ? 's' : ''} terminé${uploads.items.length > 1 ? 's' : ''}`,
+  offline.value === running.value && offline.value
+    ? `${offline.value} envoi${plural(offline.value)} en attente du réseau`
+    : running.value
+      ? `${running.value} envoi${plural(running.value)} en cours`
+      : `${uploads.items.length} envoi${plural(uploads.items.length)} terminé${plural(uploads.items.length)}`,
 )
 
 function size(bytes: number) {
@@ -64,7 +73,7 @@ const statusText = (u: Upload) =>
           <span class="nom" :title="u.name">{{ u.name }}</span>
           <small class="text-body-secondary text-nowrap">{{ size(u.size) }}</small>
           <button
-            v-if="u.status === 'attente' || u.status === 'envoi'"
+            v-if="['attente', 'reseau', 'envoi'].includes(u.status)"
             type="button"
             class="btn btn-sm btn-link text-danger p-0"
             :aria-label="`Annuler l'envoi de ${u.name}`"

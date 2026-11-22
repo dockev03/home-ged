@@ -2,6 +2,8 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
+import { memoryBackend, setOfflineBackend } from '../offline/db'
+import { rememberDocument } from '../offline/documents'
 import { useAuthStore } from '../stores/auth'
 import { useDocumentListStore } from '../stores/documentList'
 import { useOpenDocumentsStore } from '../stores/openDocuments'
@@ -405,5 +407,68 @@ describe('DocumentView', () => {
     await wrapper.find('[data-version="5"]').findAll('button').find((b) => b.text() === 'Afficher')!.trigger('click')
 
     expect(wrapper.find('iframe').attributes('src')).toBe('/api/documents/5/preview?version=5')
+  })
+})
+
+describe('DocumentView hors ligne (PWA-09)', () => {
+  beforeEach(() => {
+    setOfflineBackend(memoryBackend())
+    setActivePinia(createPinia())
+    useAuthStore().user = { id: 1, username: 'alice' }
+    stubMobile(false)
+    let n = 0
+    vi.stubGlobal('URL', Object.assign(class extends URL {}, { createObjectURL: () => `blob:copie-${++n}`, revokeObjectURL: () => {} }))
+  })
+  afterEach(() => {
+    Object.defineProperty(navigator, 'onLine', { value: true, configurable: true })
+    setOfflineBackend(null)
+    vi.unstubAllGlobals()
+    document.body.innerHTML = ''
+  })
+
+  /** Copie gardée du document 5 (fiche, vignette, aperçu), puis plus de réseau. */
+  async function keepCopyThenGoOffline() {
+    stubBff()
+    await rememberDocument(1, fakeDoc(5) as never)
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('réseau')))
+  }
+
+  it('consultée en ligne, la fiche est gardée sur l’appareil', async () => {
+    const calls = stubBff()
+    await mountView()
+    await flushPromises()
+
+    expect(calls.map((c) => c.path)).toEqual(expect.arrayContaining(['/api/documents/5/thumb', '/api/documents/5/preview']))
+  })
+
+  it('serveur injoignable : affiche la copie gardée, en lecture seule', async () => {
+    await keepCopyThenGoOffline()
+    const { wrapper } = await mountView()
+
+    expect(wrapper.find('h1').text()).toContain('Facture 5')
+    expect(wrapper.text()).toContain('Hors ligne : copie enregistrée sur cet appareil')
+    expect((wrapper.find('#titre').element as HTMLInputElement).disabled).toBe(true)
+    expect(wrapper.find('iframe').attributes('src')).toMatch(/^blob:/)
+    expect(wrapper.findAll('[role="tab"]').map((t) => t.text())).toEqual(['Détails', 'Contenu', 'Notes1'])
+    expect(wrapper.findAll('button').some((b) => ['Envoyer', 'Supprimer', 'Enregistrer', 'Suggérer'].includes(b.text()))).toBe(false)
+    expect(wrapper.text()).not.toContain('Télécharger')
+  })
+
+  it('appareil hors ligne : la copie s’affiche sans interroger le serveur', async () => {
+    await keepCopyThenGoOffline()
+    Object.defineProperty(navigator, 'onLine', { value: false, configurable: true })
+    window.dispatchEvent(new Event('offline'))
+    const { wrapper } = await mountView()
+
+    const paths = vi.mocked(fetch).mock.calls.map((c) => String(c[0]))
+    expect(paths.filter((p) => p.startsWith('/api/documents'))).toEqual([])
+    expect(wrapper.find('h1').text()).toContain('Facture 5')
+  })
+
+  it('hors ligne, un document jamais ouvert sur l’appareil n’est pas disponible', async () => {
+    await keepCopyThenGoOffline()
+    const { wrapper } = await mountView('/documents/6')
+
+    expect(wrapper.find('[role="alert"]').text()).toContain('n’a pas été ouvert récemment sur cet appareil')
   })
 })
