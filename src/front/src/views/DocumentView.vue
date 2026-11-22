@@ -5,10 +5,12 @@ import {
   deleteDocument,
   downloadUrl,
   getDocument,
+  getSuggestions,
   previewUrl,
   thumbnailUrl,
   updateDocument,
   type DocumentDetail,
+  type DocumentSuggestions,
   type Note,
 } from '../api/documents'
 import { ApiError } from '../api/http'
@@ -23,8 +25,10 @@ import DocumentVersions from '../components/DocumentVersions.vue'
 import ReferenceSelect from '../components/ReferenceSelect.vue'
 import TagPicker from '../components/TagPicker.vue'
 import { MOBILE_QUERY, useMediaQuery } from '../composables/mediaQuery'
+import { formatDate } from '../format/dates'
 import { diff, isDirty, toForm, validate, type DocumentForm } from '../documents/form'
 import { useDocumentListStore } from '../stores/documentList'
+import { useOpenDocumentsStore } from '../stores/openDocuments'
 import { useReferencesStore } from '../stores/references'
 
 /** Fiche document (UI-04) et modification de ses détails (UI-05). */
@@ -32,6 +36,7 @@ const route = useRoute()
 const router = useRouter()
 const list = useDocumentListStore()
 const references = useReferencesStore()
+const openDocuments = useOpenDocumentsStore()
 const mobile = useMediaQuery(MOBILE_QUERY)
 
 type Tab = 'details' | 'contenu' | 'metadonnees' | 'notes' | 'historique' | 'permissions' | 'versions'
@@ -68,6 +73,7 @@ const errorMessage = (e: unknown) =>
 
 function show(document: DocumentDetail) {
   doc.value = document
+  openDocuments.open({ id: document.id, title: document.title })
   original.value = toForm(document)
   form.value = toForm(document)
 }
@@ -81,6 +87,8 @@ async function load() {
   saveError.value = null
   saved.value = false
   previewVersion.value = null
+  suggestions.value = null
+  suggestError.value = null
   try {
     const document = await getDocument(requested)
     if (requested !== id.value) return
@@ -88,6 +96,7 @@ async function load() {
     notes.value = document.notes ?? []
   } catch (e) {
     if (requested !== id.value) return
+    if (e instanceof ApiError && e.status === 404) openDocuments.close(requested)
     loadError.value = e instanceof ApiError && e.status === 404 ? 'Ce document n’existe pas ou ne vous est pas accessible.' : errorMessage(e)
   }
 }
@@ -180,6 +189,7 @@ async function remove() {
   try {
     await deleteDocument(doc.value.id)
     list.forget(doc.value.id)
+    openDocuments.close(doc.value.id)
     confirmingDelete.value = false
     await leave(listRoute.value)
   } catch (e) {
@@ -189,6 +199,65 @@ async function remove() {
     deleting.value = false
   }
 }
+
+// Suggestions de classement de Paperless (UI-12) : appliquées au formulaire, pas enregistrées.
+const suggestions = ref<DocumentSuggestions | null>(null)
+const suggesting = ref(false)
+const suggestError = ref<string | null>(null)
+
+async function suggest() {
+  if (!doc.value || suggesting.value) return
+  const requested = doc.value.id
+  suggesting.value = true
+  suggestError.value = null
+  try {
+    const result = await getSuggestions(requested)
+    if (requested === id.value) suggestions.value = result
+  } catch (e) {
+    if (requested === id.value) suggestError.value = errorMessage(e)
+  } finally {
+    suggesting.value = false
+  }
+}
+
+interface Suggestion {
+  key: string
+  label: string
+  apply: () => void
+}
+
+/** Suggestions pas encore présentes dans le formulaire, avec leur nom (éléments connus seulement). */
+const suggestionItems = computed<Suggestion[]>(() => {
+  const s = suggestions.value
+  const f = form.value
+  if (!s || !f) return []
+  const items: Suggestion[] = []
+  for (const tagId of s.tags) {
+    const tag = references.tags.get(tagId)
+    if (tag && !f.tags.includes(tagId))
+      items.push({ key: `t${tagId}`, label: `Étiquette : ${tag.name}`, apply: () => f.tags.push(tagId) })
+  }
+  const single = (
+    ids: number[],
+    names: Map<number, { name: string }>,
+    field: 'correspondent' | 'document_type' | 'storage_path',
+    prefix: string,
+  ) => {
+    for (const refId of ids) {
+      const item = names.get(refId)
+      if (item && f[field] !== refId)
+        items.push({ key: `${field}${refId}`, label: `${prefix} : ${item.name}`, apply: () => (f[field] = refId) })
+    }
+  }
+  single(s.correspondents, references.correspondants, 'correspondent', 'Correspondant')
+  single(s.document_types, references.types, 'document_type', 'Type')
+  single(s.storage_paths, references.chemins, 'storage_path', 'Chemin')
+  for (const date of s.dates) {
+    if (f.created !== date)
+      items.push({ key: `d${date}`, label: `Date : ${formatDate(date)}`, apply: () => (f.created = date) })
+  }
+  return items
+})
 
 /** Entrée dans un champ de saisie des détails : enregistre (sauf dans un formulaire de création « + »). */
 function onEnter(event: KeyboardEvent) {
@@ -287,6 +356,28 @@ const goTo = (target: number | null) => target !== null && router.push({ name: '
           <div :id="`panneau-${tab}`" role="tabpanel" :aria-labelledby="`onglet-${tab}`">
             <div v-if="tab === 'details'" class="details" @keydown.enter="onEnter">
               <p v-if="!canEdit" class="alert alert-info">Vous pouvez consulter ce document, pas le modifier.</p>
+              <div v-else class="span-2 suggestions">
+                <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="suggesting" @click="suggest">
+                  <span v-if="suggesting" class="spinner-border spinner-border-sm me-1" aria-hidden="true" />
+                  Suggérer
+                </button>
+                <span v-if="suggestError" class="text-danger small" role="alert">{{ suggestError }}</span>
+                <template v-else-if="suggestions">
+                  <button
+                    v-for="item in suggestionItems"
+                    :key="item.key"
+                    type="button"
+                    class="btn btn-sm btn-outline-primary suggestion"
+                    :title="`Appliquer ${item.label}`"
+                    @click="item.apply"
+                  >
+                    + {{ item.label }}
+                  </button>
+                  <span v-if="!suggestionItems.length" class="text-body-secondary small" role="status">
+                    Aucune autre suggestion pour ce document.
+                  </span>
+                </template>
+              </div>
               <div class="span-2">
                 <label class="form-label" for="titre">Titre</label>
                 <input id="titre" v-model="form.title" class="form-control" maxlength="128" required :disabled="!canEdit" />
@@ -472,6 +563,20 @@ const goTo = (target: number | null) => target !== null && router.push({ name: '
 
 .span-2 {
   grid-column: 1 / -1;
+}
+
+.suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.suggestion {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .contenu {

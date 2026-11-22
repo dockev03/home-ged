@@ -389,4 +389,155 @@ describe('DocumentsView', () => {
       expect(wrapper.find('[aria-label="Sélection"]').exists()).toBe(false)
     })
   })
+
+  describe('vues sauvegardées', () => {
+    const VIEW = {
+      id: 12,
+      name: 'Factures EDF',
+      filter_rules: [
+        { rule_type: 26, value: '4' },
+        { rule_type: 21, value: '99' },
+      ],
+      sort_field: 'created',
+      sort_reverse: true,
+      owner: 7,
+      user_can_change: true,
+    }
+
+    function stubViews() {
+      const sent: { method: string; path: string; body: unknown }[] = []
+      const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input), 'http://localhost')
+        const method = init?.method ?? 'GET'
+        if (method !== 'GET') {
+          sent.push({ method, path: url.pathname, body: init?.body ? JSON.parse(String(init.body)) : null })
+          if (method === 'DELETE') return new Response(null, { status: 204 })
+          return Response.json({ ...VIEW, id: method === 'POST' ? 13 : 12, name: 'Nouvelle' }, { status: method === 'POST' ? 201 : 200 })
+        }
+        if (url.pathname === '/api/vues') return Response.json({ vues: [VIEW], tableau_de_bord: [], menu: [12] })
+        if (url.pathname.startsWith('/api/references/')) return Response.json([])
+        if (url.pathname === '/api/documents/ids') return Response.json([])
+        if (url.pathname === '/api/documents') return Response.json({ count: 1, results: [doc(1)] })
+        return new Response(null, { status: 404 })
+      })
+      vi.stubGlobal('fetch', fetchMock)
+      return sent
+    }
+
+    const menuItem = (wrapper: Awaited<ReturnType<typeof mountView>>['wrapper'], label: string) =>
+      wrapper.findAll('.dropdown-item').find((item) => item.text().startsWith(label))!
+
+    async function openMenu(wrapper: Awaited<ReturnType<typeof mountView>>['wrapper']) {
+      await wrapper.find('button[aria-label="Vues sauvegardées"]').trigger('click')
+    }
+
+    it('affiche le nom de la vue ouverte et signale ses critères non pris en charge', async () => {
+      stubViews()
+      const { wrapper } = await mountView('/documents?correspondant=4&vue=12')
+
+      expect(wrapper.find('h1').text()).toBe('Factures EDF')
+      expect(wrapper.find('.alert-warning').text()).toContain('1 critère')
+    })
+
+    it('marque la vue modifiée et la met à jour en conservant les critères inconnus', async () => {
+      const sent = stubViews()
+      const { wrapper, router } = await mountView('/documents?correspondant=4&vue=12')
+
+      wrapper.findComponent(FilterBar).vm.$emit('update:modelValue', { ...defaultFilters(), correspondants: [4], tags: [1] })
+      await flushPromises()
+      expect(router.currentRoute.value.query.vue).toBe('12')
+      expect(wrapper.find('h1').text()).toContain('modifiée')
+
+      await openMenu(wrapper)
+      await menuItem(wrapper, 'Mettre à jour').trigger('click')
+      await flushPromises()
+
+      expect(sent).toEqual([
+        {
+          method: 'PATCH',
+          path: '/api/vues/12',
+          body: {
+            filter_rules: [
+              { rule_type: 6, value: '1' },
+              { rule_type: 26, value: '4' },
+              { rule_type: 21, value: '99' },
+            ],
+            sort_field: 'created',
+            sort_reverse: true,
+          },
+        },
+      ])
+      expect(wrapper.find('.alert-success').text()).toContain('mise à jour')
+    })
+
+    it('enregistre les filtres comme nouvelle vue et l’ouvre', async () => {
+      const sent = stubViews()
+      const { wrapper, router } = await mountView('/documents?tags=1&tri=title&ordre=asc')
+
+      await openMenu(wrapper)
+      await menuItem(wrapper, 'Enregistrer comme nouvelle vue').trigger('click')
+      await wrapper.find('#vue-nom').setValue(' Banque ')
+      await wrapper.find('#vue-tableau').setValue(true)
+      await wrapper.find('.modal form').trigger('submit')
+      await flushPromises()
+
+      expect(sent).toEqual([
+        {
+          method: 'POST',
+          path: '/api/vues',
+          body: {
+            name: 'Banque',
+            filter_rules: [{ rule_type: 6, value: '1' }],
+            sort_field: 'title',
+            sort_reverse: false,
+            tableau_de_bord: true,
+            menu: true,
+          },
+        },
+      ])
+      expect(router.currentRoute.value.query).toEqual({ tags: '1', tri: 'title', ordre: 'asc', vue: '13' })
+    })
+
+    it('refuse une vue sans nom', async () => {
+      const sent = stubViews()
+      const { wrapper } = await mountView()
+
+      await openMenu(wrapper)
+      await menuItem(wrapper, 'Enregistrer comme nouvelle vue').trigger('click')
+      await wrapper.find('.modal form').trigger('submit')
+      await flushPromises()
+
+      expect(sent).toEqual([])
+      expect(wrapper.find('.modal .alert-danger').text()).toContain('nom')
+    })
+
+    it('supprime la vue après confirmation et garde les filtres', async () => {
+      const sent = stubViews()
+      const { wrapper, router } = await mountView('/documents?correspondant=4&vue=12')
+
+      await openMenu(wrapper)
+      await menuItem(wrapper, 'Supprimer la vue').trigger('click')
+      expect(sent).toEqual([])
+      await wrapper.findAll('.modal-footer button').find((b) => b.text() === 'Supprimer')!.trigger('click')
+      await flushPromises()
+
+      expect(sent).toEqual([{ method: 'DELETE', path: '/api/vues/12', body: null }])
+      expect(router.currentRoute.value.query).toEqual({ correspondant: '4' })
+    })
+
+    it('ne propose ni mise à jour ni suppression d’une vue partagée en lecture seule', async () => {
+      stubViews()
+      VIEW.user_can_change = false
+      onTestFinished(() => {
+        VIEW.user_can_change = true
+      })
+      const { wrapper } = await mountView('/documents?correspondant=4&vue=12')
+
+      await openMenu(wrapper)
+      const labels = wrapper.findAll('.dropdown-item').map((item) => item.text())
+      expect(labels).toContain('Modifier la vue…')
+      expect(labels.some((label) => label.startsWith('Mettre à jour'))).toBe(false)
+      expect(labels.some((label) => label.startsWith('Supprimer'))).toBe(false)
+    })
+  })
 })

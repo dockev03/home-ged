@@ -16,6 +16,9 @@ internal sealed class FakeHttpHandler(Func<HttpRequestMessage, string?, HttpResp
 
     public int Calls { get; private set; }
 
+    /// <summary>Toutes les requêtes reçues (méthode, chemin et requête, corps), dans l'ordre.</summary>
+    public System.Collections.Concurrent.ConcurrentQueue<(HttpMethod Method, string PathAndQuery, string? Body)> History { get; } = new();
+
     public static FakeHttpHandler Returning(HttpStatusCode status, params (string Name, string Value)[] headers) =>
         Returning(status, null, headers);
 
@@ -41,6 +44,7 @@ internal sealed class FakeHttpHandler(Func<HttpRequestMessage, string?, HttpResp
         Calls++;
         LastRequest = request;
         LastBody = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
+        History.Enqueue((request.Method, request.RequestUri!.PathAndQuery, LastBody));
         return respond(request, LastBody);
     }
 }

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useDocumentListStore } from '../stores/documentList'
+import { useOpenDocumentsStore } from '../stores/openDocuments'
 import DocumentView from './DocumentView.vue'
 
 function fakeDoc(id: number, extra: Record<string, unknown> = {}) {
@@ -61,6 +62,8 @@ function stubBff(overrides: Record<number, Record<string, unknown>> = {}, failur
       const doc = { ...fakeDoc(id), ...overrides[id] }
       if (match[2] === '/notes' && method === 'POST')
         return Response.json([...doc.notes, { id: 2, note: body.note, created: '2026-03-17T10:00:00Z', user: { id: 1, username: 'alice' } }])
+      if (match[2] === '/suggestions')
+        return Response.json({ tags: [1, 9], correspondents: [4], document_types: [], storage_paths: [], dates: ['2026-03-12'] })
       if (match[2] === '/metadata') return Response.json({ original_checksum: 'abc', original_size: 2048, has_archive_version: false, original_metadata: [] })
       if (method === 'PATCH') return Response.json({ ...doc, ...body })
       if (method === 'DELETE') return new Response(null, { status: 204 })
@@ -257,6 +260,41 @@ describe('DocumentView', () => {
     expect(writes(calls)).toEqual([{ method: 'DELETE', path: '/api/documents/5', body: undefined }])
     expect(router.currentRoute.value.query).toEqual({ tags: '1' })
     expect(useDocumentListStore().ids).toEqual([4, 6])
+    expect(useOpenDocumentsStore().documents).toEqual([])
+  })
+
+  it('ajoute la fiche aux documents ouverts', async () => {
+    stubBff()
+    const { router } = await mountView()
+    await router.push('/documents/6')
+    await flushPromises()
+
+    expect(useOpenDocumentsStore().documents).toEqual([
+      { id: 6, title: 'Facture 6' },
+      { id: 5, title: 'Facture 5' },
+    ])
+  })
+
+  it('« Suggérer » propose les éléments absents et les applique sans enregistrer', async () => {
+    const calls = stubBff({ 6: { tags: [], correspondent: null } })
+    const { wrapper } = await mountView('/documents/6')
+
+    await button(wrapper, 'Suggérer').trigger('click')
+    await flushPromises()
+
+    const labels = wrapper.findAll('.suggestion').map((b) => b.text())
+    // Étiquette 9 inconnue des listes de référence : ignorée.
+    expect(labels).toEqual(['+ Étiquette : Banque', '+ Correspondant : EDF', expect.stringMatching(/^\+ Date : 12/)])
+    await wrapper.findAll('.suggestion')[1]!.trigger('click')
+    await wrapper.findAll('.suggestion')[0]!.trigger('click')
+    await wrapper.find('.suggestion').trigger('click')
+
+    expect(wrapper.findAll('.suggestion')).toHaveLength(0)
+    expect(wrapper.text()).toContain('Aucune autre suggestion')
+    expect((wrapper.find('#correspondant').element as HTMLSelectElement).value).toBe('4')
+    expect((wrapper.find('#date').element as HTMLInputElement).value).toBe('2026-03-12')
+    expect(writes(calls)).toEqual([])
+    expect(wrapper.text()).toContain('Modifications non enregistrées')
   })
 
   it('en lecture seule, rien ne se modifie', async () => {

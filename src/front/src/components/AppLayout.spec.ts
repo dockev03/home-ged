@@ -1,8 +1,9 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import { useOpenDocumentsStore } from '../stores/openDocuments'
 import { useUploadsStore } from '../stores/uploads'
 import AppLayout from './AppLayout.vue'
 
@@ -19,6 +20,8 @@ async function mountLayout(path = '/') {
           { path: 'documents', name: 'documents', component: page },
           { path: 'sessions', name: 'sessions', component: page },
           { path: 'documents/:id', name: 'document', component: page },
+          { path: 'gerer/:type', name: 'gerer', component: page },
+          { path: 'corbeille', name: 'corbeille', component: page },
         ],
       },
     ],
@@ -49,6 +52,73 @@ describe('AppLayout', () => {
     const scanner = wrapper.findAll('.nav-link.disabled').find((l) => l.text().startsWith('Scanner'))!
     expect(scanner.attributes('aria-disabled')).toBe('true')
     expect(scanner.text()).toContain('bientôt')
+  })
+
+  it('mène à la corbeille', async () => {
+    const { wrapper } = await mountLayout('/corbeille')
+
+    expect(wrapper.find('#menu-principal .nav-link.active').text()).toBe('Corbeille')
+  })
+
+  it('liste les documents ouverts, les ferme un par un ou tous', async () => {
+    sessionStorage.clear()
+    const open = useOpenDocumentsStore()
+    open.load(1)
+    open.open({ id: 4, title: 'Devis' })
+    open.open({ id: 5, title: 'Facture' })
+    const { wrapper, router } = await mountLayout('/documents/5')
+
+    const section = wrapper.find('.documents-ouverts')
+    expect(section.findAll('a').map((a) => a.text())).toEqual(['Facture', 'Devis'])
+    expect(section.find('a.active').text()).toBe('Facture')
+
+    await section.find('button[aria-label="Fermer Devis"]').trigger('click')
+    expect(open.documents.map((d) => d.id)).toEqual([5])
+    expect(router.currentRoute.value.name).toBe('document')
+
+    await wrapper.findAll('.documents-ouverts button').find((b) => b.text() === 'Tout fermer')!.trigger('click')
+    await flushPromises()
+    expect(open.documents).toEqual([])
+    expect(router.currentRoute.value.name).toBe('documents')
+    expect(wrapper.find('.documents-ouverts').exists()).toBe(false)
+  })
+
+  it('mène aux écrans « Gérer » et marque l’écran ouvert', async () => {
+    const { wrapper } = await mountLayout('/gerer/correspondants')
+
+    const links = wrapper.findAll('#menu-principal a.nav-link')
+    const labels = links.map((l) => l.text())
+    expect(labels).toEqual(expect.arrayContaining(['Étiquettes', 'Correspondants', 'Types de documents', 'Chemins de stockage', 'Champs personnalisés']))
+    expect(links.find((l) => l.text() === 'Étiquettes')!.attributes('href')).toBe('/gerer/etiquettes')
+    const active = wrapper.findAll('#menu-principal .nav-link.active')
+    expect(active.map((l) => l.text())).toEqual(['Correspondants'])
+  })
+
+  it('affiche les vues choisies pour le menu et marque la vue ouverte', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) =>
+        String(input) === '/api/vues'
+          ? Response.json({
+              vues: [
+                { id: 3, name: 'Impôts', filter_rules: [{ rule_type: 6, value: '2' }], sort_field: null, sort_reverse: false, owner: 1 },
+                { id: 4, name: 'Cachée', filter_rules: [], sort_field: null, sort_reverse: false, owner: 1 },
+              ],
+              tableau_de_bord: [],
+              menu: [3],
+            })
+          : new Response(null, { status: 404 }),
+      ),
+    )
+    onTestFinished(() => {
+      vi.unstubAllGlobals()
+    })
+    const { wrapper } = await mountLayout('/documents?tags=2&vue=3')
+
+    const view = wrapper.findAll('#menu-principal a.nav-link').find((l) => l.text() === 'Impôts')!
+    expect(view.attributes('href')).toBe('/documents?tags=2&vue=3')
+    expect(wrapper.findAll('#menu-principal .nav-link.active').map((l) => l.text())).toEqual(['Impôts'])
+    expect(wrapper.text()).not.toContain('Cachée')
   })
 
   it('lance une recherche plein texte vers la liste des documents', async () => {

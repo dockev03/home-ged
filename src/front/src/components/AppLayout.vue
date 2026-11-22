@@ -1,7 +1,12 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
+import { useRoute, useRouter, type LocationQueryRaw } from 'vue-router'
 import { MOBILE_QUERY, useMediaQuery } from '../composables/mediaQuery'
+import { viewQuery } from '../filters/savedViews'
+import { KINDS } from '../gestion/kinds'
+import { useAuthStore } from '../stores/auth'
+import { useOpenDocumentsStore } from '../stores/openDocuments'
+import { useSavedViewsStore } from '../stores/savedViews'
 import { useUploadsStore } from '../stores/uploads'
 import UploadPanel from './UploadPanel.vue'
 import UserMenu from './UserMenu.vue'
@@ -14,29 +19,84 @@ import UserMenu from './UserMenu.vue'
 const route = useRoute()
 const router = useRouter()
 
+interface MenuItem {
+  label: string
+  to?: string
+  params?: Record<string, string>
+  query?: LocationQueryRaw
+  /** Vue sauvegardée ouverte par l'entrée (UI-08). */
+  viewId?: number
+}
+
+const auth = useAuthStore()
+const savedViews = useSavedViewsStore()
+onMounted(() => void savedViews.ensureLoaded())
+
+// Documents ouverts (UI-11) : ceux de l'utilisateur connecté.
+const openDocuments = useOpenDocumentsStore()
+watch(
+  () => auth.user?.id,
+  (id) => id !== undefined && openDocuments.load(id),
+  { immediate: true },
+)
+
+/** Fiche fermée depuis le menu : si c'est celle affichée, retour à la liste. */
+function closeDocument(id: number) {
+  openDocuments.close(id)
+  if (route.name === 'document' && Number(route.params.id) === id) void router.push({ name: 'documents' })
+}
+
+function closeAllDocuments() {
+  const showing = route.name === 'document'
+  openDocuments.closeAll()
+  if (showing) void router.push({ name: 'documents' })
+}
+
 /** Entrées du menu ; celles sans route arrivent aux étapes suivantes. */
-const SECTIONS: { title?: string; items: { label: string; to?: string }[] }[] = [
+const sections = computed<{ title?: string; items: MenuItem[]; open?: boolean }[]>(() => [
   {
     items: [
       { label: 'Tableau de bord', to: 'accueil' },
       { label: 'Documents', to: 'documents' },
     ],
   },
+  ...(savedViews.sidebar.length
+    ? [
+        {
+          title: 'Vues',
+          items: savedViews.sidebar.map((view) => ({
+            label: view.name,
+            to: 'documents',
+            query: viewQuery(view, auth.user?.id ?? null),
+            viewId: view.id,
+          })),
+        },
+      ]
+    : []),
+  ...(openDocuments.documents.length ? [{ title: 'Documents ouverts', items: [], open: true }] : []),
   {
     title: 'Gérer',
     items: [
-      { label: 'Étiquettes' },
-      { label: 'Correspondants' },
-      { label: 'Types de documents' },
-      { label: 'Chemins de stockage' },
-      { label: 'Champs personnalisés' },
+      ...KINDS.map((k) => ({ label: k.title, to: 'gerer', params: { type: k.slug } })),
+      { label: 'Corbeille', to: 'corbeille' },
     ],
   },
   {
     title: 'Home-GED',
     items: [{ label: 'Scanner' }, { label: 'Mes liens' }],
   },
-]
+])
+
+/** Vue ouverte dans la liste des documents : elle est mise en avant à la place de « Documents ». */
+const openViewId = computed(() => (route.name === 'documents' && typeof route.query.vue === 'string' ? route.query.vue : null))
+
+function linkClasses(item: MenuItem) {
+  if (item.viewId !== undefined) return { 'active-class': '', 'exact-active-class': '', active: openViewId.value === String(item.viewId) }
+  if (item.to === 'documents') {
+    return { 'active-class': '', 'exact-active-class': '', active: openViewId.value === null && (route.name === 'documents' || route.name === 'document') }
+  }
+  return { 'active-class': item.to === 'accueil' ? '' : 'active', 'exact-active-class': 'active', active: false }
+}
 
 const drawerOpen = ref(false)
 const drawer = useTemplateRef<HTMLElement>('drawer')
@@ -159,17 +219,34 @@ onBeforeUnmount(() => document.body.classList.remove('overflow-hidden'))
         <button type="button" class="btn-close" aria-label="Fermer le menu" @click="drawerOpen = false" />
       </div>
       <div class="offcanvas-body flex-column">
-        <template v-for="section in SECTIONS" :key="section.title ?? 'principal'">
+        <template v-for="section in sections" :key="section.title ?? 'principal'">
           <h2 v-if="section.title" class="menu-titre">{{ section.title }}</h2>
-          <ul class="nav nav-pills flex-column">
-            <li v-for="item in section.items" :key="item.label" class="nav-item">
+          <ul v-if="section.open" class="nav nav-pills flex-column documents-ouverts">
+            <li v-for="d in openDocuments.documents" :key="d.id" class="nav-item">
+              <RouterLink
+                class="nav-link"
+                active-class=""
+                exact-active-class="active"
+                :to="{ name: 'document', params: { id: d.id } }"
+                :title="d.title"
+              >
+                {{ d.title }}
+              </RouterLink>
+              <button type="button" class="btn-close fermer" :aria-label="`Fermer ${d.title}`" @click="closeDocument(d.id)" />
+            </li>
+            <li class="nav-item">
+              <button type="button" class="nav-link tout-fermer" @click="closeAllDocuments">Tout fermer</button>
+            </li>
+          </ul>
+          <ul v-else class="nav nav-pills flex-column">
+            <li v-for="item in section.items" :key="item.viewId ?? item.label" class="nav-item">
               <RouterLink
                 v-if="item.to"
                 class="nav-link"
-                :active-class="item.to === 'accueil' ? '' : 'active'"
-                exact-active-class="active"
-                :class="{ active: item.to === 'documents' && route.name === 'document' }"
-                :to="{ name: item.to }"
+                :active-class="linkClasses(item)['active-class']"
+                :exact-active-class="linkClasses(item)['exact-active-class']"
+                :class="{ active: linkClasses(item).active }"
+                :to="{ name: item.to, params: item.params, query: item.query }"
               >
                 {{ item.label }}
               </RouterLink>
@@ -253,6 +330,31 @@ onBeforeUnmount(() => document.body.classList.remove('overflow-hidden'))
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--bs-secondary-color);
+}
+
+.documents-ouverts .nav-item {
+  display: flex;
+  align-items: center;
+}
+
+.documents-ouverts .nav-link {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fermer {
+  flex: 0 0 auto;
+  margin: 0 0.5rem;
+  font-size: 0.65rem;
+}
+
+.tout-fermer {
+  text-align: start;
+  color: var(--bs-secondary-color);
+  font-size: 0.875rem;
 }
 
 .contenu {
