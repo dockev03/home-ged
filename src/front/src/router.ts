@@ -19,6 +19,7 @@ export const routes = [
       { path: 'documents', name: 'documents', component: () => import('./views/DocumentsView.vue') },
       { path: 'documents/:id(\\d+)', name: 'document', component: () => import('./views/DocumentView.vue') },
       { path: 'corbeille', name: 'corbeille', component: () => import('./views/TrashView.vue') },
+      { path: 'liens', name: 'liens', component: () => import('./views/SharesView.vue') },
       { path: 'sessions', name: 'sessions', component: () => import('./views/SessionsView.vue') },
       {
         path: `gerer/:type(${KIND_SLUGS.join('|')})`,
@@ -31,6 +32,13 @@ export const routes = [
     path: '/connexion',
     name: 'connexion',
     component: () => import('./views/LoginView.vue'),
+    meta: { public: true },
+  },
+  {
+    // Page publique d'un lien de partage (SHARE-03) : pour un destinataire sans compte.
+    path: '/s/:id',
+    name: 'partage-public',
+    component: () => import('./views/PublicShareView.vue'),
     meta: { public: true },
   },
   { path: '/:chemin(.*)*', name: 'introuvable', component: () => import('./views/NotFoundView.vue') },

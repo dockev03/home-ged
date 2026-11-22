@@ -23,6 +23,7 @@ import DocumentNotes from '../components/DocumentNotes.vue'
 import DocumentPermissions from '../components/DocumentPermissions.vue'
 import DocumentVersions from '../components/DocumentVersions.vue'
 import ReferenceSelect from '../components/ReferenceSelect.vue'
+import ShareDialog from '../components/ShareDialog.vue'
 import TagPicker from '../components/TagPicker.vue'
 import { MOBILE_QUERY, useMediaQuery } from '../composables/mediaQuery'
 import { formatDate } from '../format/dates'
@@ -101,7 +102,10 @@ async function load() {
   }
 }
 
-watch(id, load)
+watch(id, () => {
+  sharing.value = false
+  void load()
+})
 onMounted(() => {
   void references.ensureLoaded()
   void load()
@@ -181,6 +185,8 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload)
 
 // Suppression : Paperless place le document dans sa corbeille.
 const confirmingDelete = ref(false)
+/** Fenêtre de création d'un lien de partage protégé (F-SHARE). */
+const sharing = ref(false)
 const deleting = ref(false)
 
 async function remove() {
@@ -315,9 +321,7 @@ const goTo = (target: number | null) => target !== null && router.push({ name: '
             </a>
             <a class="dropdown-item" role="menuitem" :href="downloadUrl(doc.id, true)" download>Fichier original</a>
           </BaseDropdown>
-          <button type="button" class="btn btn-outline-secondary" disabled title="Liens de partage protégés : lot 3">
-            Envoyer
-          </button>
+          <button type="button" class="btn btn-outline-secondary" @click="sharing = true">Envoyer</button>
           <button v-if="canEdit" type="button" class="btn btn-outline-danger" @click="confirmingDelete = true">
             Supprimer
           </button>
@@ -457,6 +461,8 @@ const goTo = (target: number | null) => target !== null && router.push({ name: '
     >
       « {{ doc?.title }} » sera placé dans la corbeille de Paperless, d'où il pourra être restauré.
     </ConfirmDialog>
+
+    <ShareDialog v-if="doc" :open="sharing" :document-id="doc.id" :document-title="doc.title" @close="sharing = false" />
 
     <ConfirmDialog
       :open="pendingLeave !== null"

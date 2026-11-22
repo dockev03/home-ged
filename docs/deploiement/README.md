@@ -109,6 +109,28 @@ Le script d'initialisation de PostgreSQL ne s'exécute qu'à la création du vol
 - Ces valeurs se règlent par variables d'environnement du service `app` : `Auth__IdleTimeoutDays`, `Auth__AbsoluteLifetimeDays`, `Auth__MaxFailedAttempts`, `Auth__LockoutMinutes`.
 - Le token Paperless est chiffré en base (ASP.NET Data Protection), mais les clés de chiffrement sont dans la même base. Cela protège d'une fuite de la seule table `sessions`, pas d'un vol de la base entière ou d'une sauvegarde déchiffrée.
 
+### Liens de partage
+
+- Le bouton **Envoyer** de la fiche document crée un lien protégé par un **mot de passe obligatoire** (8 caractères au moins, haché en Argon2id), avec une **durée de validité** de 30 jours au plus et, en option, un nombre maximal de téléchargements. Chacun retrouve et révoque ses liens dans **Mes liens**.
+- La durée maximale se règle par la variable `Share__MaxExpirationDays` du service `app` (30 par défaut, 365 au plus).
+- Les liens expirés ou révoqués sont supprimés de la base 30 jours plus tard, avec leur journal d'accès.
+- Le destinataire ouvre `https://ged.<domaine>/s/<identifiant>`, saisit le mot de passe, puis voit l'aperçu et télécharge le fichier. Le fichier transite par Home-GED : Paperless n'est jamais exposé. Le mot de passe donne accès au lien pendant 30 minutes (cookie limité à ce lien), puis il faut le ressaisir.
+- Quelle que soit la cause du refus (mauvais mot de passe, lien inconnu, expiré, révoqué ou épuisé), la réponse est la même : « Lien indisponible ou mot de passe incorrect ».
+- **5 échecs en 15 minutes** sur un même lien, ou depuis une même IP, bloquent les tentatives pendant 15 minutes (mêmes réglages `Auth__MaxFailedAttempts` et `Auth__LockoutMinutes` que la connexion).
+- Chaque tentative d'ouverture est journalisée (date, IP, navigateur, succès ou échec). Le propriétaire du lien la consulte dans **Mes liens** > **Journal**.
+
+#### Compte de service des liens
+
+La page publique lit les documents dans Paperless avec un **compte de service en lecture seule**, jamais avec le compte du propriétaire. Sans lui, les liens ne s'ouvrent pas (message générique) et un avertissement apparaît dans les logs au démarrage.
+
+1. Dans l'administration Paperless (**Utilisateurs et groupes**), crée l'utilisateur `homeged-partage` : actif, sans statut superutilisateur, avec un mot de passe long que personne n'utilisera.
+2. Donne-lui une seule permission globale : **Document > Afficher**. Vérifie qu'il n'hérite d'aucune autre permission par un groupe : un groupe qui porte des droits de modification les lui donnerait aussi.
+3. Il doit **voir les documents partagés**. Selon la configuration, accorde-lui le droit de lecture sur les documents (permissions par défaut, ou workflow « Attribuer des permissions » sur `homeged-partage`). Un document qu'il ne voit pas donne la réponse « lien indisponible ».
+4. Crée son token API : connecte-toi une fois avec ce compte, puis **Mon profil** > **Token API**. Tu peux aussi passer par l'administration Django (**Auth Token** > **Ajouter**).
+5. Mets le token dans `HOMEGED_SHARE_TOKEN` (`.env` ou variables de la stack Portainer), puis `sudo docker compose up -d app`.
+
+Pour couper l'accès public d'un coup, supprime ce token dans Paperless : tous les liens répondent alors « momentanément indisponible ».
+
 ### Et Portainer ?
 
 Toutes les images sont désormais téléchargeables : la stack est entièrement gérable depuis Portainer. Déclare le registre une fois (**Registries** > **Add registry** > **Custom registry**, URL `ghcr.io`, utilisateur `dockev03`, mot de passe : le token `read:packages`), puis crée la stack depuis le dépôt Git (**Stacks** > **Add stack** > **Repository**, chemin `deploy/docker-compose.yml`) en saisissant les variables de `.env.example`.

@@ -5,6 +5,7 @@ using HomeGed.Api.Data;
 using HomeGed.Api.Documents;
 using HomeGed.Api.Hosting;
 using HomeGed.Api.Paperless;
+using HomeGed.Api.Shares;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -76,6 +77,16 @@ public static class HomeGedApp
         builder.Services.AddScoped<ISessionStore, EfSessionStore>();
         builder.Services.AddScoped<PaperlessRelay>();
         builder.Services.AddHostedService<SessionCleanupService>();
+
+        // Liens de partage protégés (F-SHARE).
+        builder.Services.AddOptions<ShareOptions>()
+            .Bind(builder.Configuration.GetSection(ShareOptions.Section))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+        builder.Services.AddScoped<IShareLinkStore, EfShareLinkStore>();
+        builder.Services.AddSingleton<ShareTickets>();
+        builder.Services.AddHostedService<ShareCleanupService>();
+
         builder.Services.AddAuthentication(SessionAuthenticationHandler.SchemeName)
             .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, SessionAuthenticationHandler>(
                 SessionAuthenticationHandler.SchemeName, null);
@@ -101,6 +112,7 @@ public static class HomeGedApp
         configure?.Invoke(builder);
 
         var app = builder.Build();
+        PublicShareEndpoints.WarnIfNotConfigured(app);
 
         app.UseForwardedHeaders();
         if (!app.Environment.IsDevelopment())
@@ -126,6 +138,8 @@ public static class HomeGedApp
         api.MapSavedViews();
         api.MapDashboard();
         api.MapTrash();
+        api.MapShares();
+        api.MapPublicShares();
         // Toute autre route /api/* : 404 JSON, jamais la page de l'application.
         api.Map("/{**rest}", () => Results.Problem(statusCode: (int)HttpStatusCode.NotFound)).AllowAnonymous();
 
