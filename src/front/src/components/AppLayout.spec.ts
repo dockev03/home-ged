@@ -22,6 +22,7 @@ async function mountLayout(path = '/') {
           { path: 'documents/:id', name: 'document', component: page },
           { path: 'gerer/:type', name: 'gerer', component: page },
           { path: 'corbeille', name: 'corbeille', component: page },
+          { path: 'liens', name: 'liens', component: page },
         ],
       },
     ],
@@ -58,6 +59,12 @@ describe('AppLayout', () => {
     const { wrapper } = await mountLayout('/corbeille')
 
     expect(wrapper.find('#menu-principal .nav-link.active').text()).toBe('Corbeille')
+  })
+
+  it('mène à « Mes liens »', async () => {
+    const { wrapper } = await mountLayout('/liens')
+
+    expect(wrapper.find('#menu-principal .nav-link.active').text()).toBe('Mes liens')
   })
 
   it('liste les documents ouverts, les ferme un par un ou tous', async () => {

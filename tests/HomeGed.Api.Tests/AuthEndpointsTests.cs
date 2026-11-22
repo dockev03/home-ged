@@ -4,6 +4,7 @@ using System.Text.Json;
 using HomeGed.Api.Auth;
 using HomeGed.Api.Data;
 using HomeGed.Api.Paperless;
+using HomeGed.Api.Shares;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Hosting;
@@ -22,6 +23,8 @@ public sealed class AuthAppFixture : IAsyncLifetime
     private WebApplication? _app;
 
     internal InMemorySessionStore Store { get; } = new();
+
+    internal InMemoryShareLinkStore Shares { get; } = new();
 
     internal FakeTimeProvider Time { get; } = new();
 
@@ -58,6 +61,7 @@ public sealed class AuthAppFixture : IAsyncLifetime
                 b.WebHost.UseUrls("http://127.0.0.1:0");
                 b.Services.AddHttpClient<PaperlessClient>().ConfigurePrimaryHttpMessageHandler(() => Paperless);
                 b.Services.AddSingleton<ISessionStore>(Store);
+                b.Services.AddSingleton<IShareLinkStore>(Shares);
                 b.Services.AddSingleton<TimeProvider>(Time);
                 b.Services.AddSingleton<IDataProtectionProvider>(new EphemeralDataProtectionProvider());
             });
@@ -135,7 +139,8 @@ internal static class FakePaperless
             };
         }
 
-        return FakePaperlessTrash.Respond(request, body)
+        return FakePaperlessShares.Respond(request, body)
+            ?? FakePaperlessTrash.Respond(request, body)
             ?? FakePaperlessViews.Respond(request, body)
             ?? FakePaperlessManage.Respond(request, body)
             ?? FakePaperlessDocuments.Respond(request, body)

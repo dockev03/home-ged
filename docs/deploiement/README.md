@@ -109,6 +109,12 @@ Le script d'initialisation de PostgreSQL ne s'exécute qu'à la création du vol
 - Ces valeurs se règlent par variables d'environnement du service `app` : `Auth__IdleTimeoutDays`, `Auth__AbsoluteLifetimeDays`, `Auth__MaxFailedAttempts`, `Auth__LockoutMinutes`.
 - Le token Paperless est chiffré en base (ASP.NET Data Protection), mais les clés de chiffrement sont dans la même base. Cela protège d'une fuite de la seule table `sessions`, pas d'un vol de la base entière ou d'une sauvegarde déchiffrée.
 
+### Liens de partage
+
+- Le bouton **Envoyer** de la fiche document crée un lien protégé par un **mot de passe obligatoire** (8 caractères au moins, haché en Argon2id), avec une **durée de validité** de 30 jours au plus et, en option, un nombre maximal de téléchargements. Chacun retrouve et révoque ses liens dans **Mes liens**.
+- La durée maximale se règle par la variable `Share__MaxExpirationDays` du service `app` (30 par défaut, 365 au plus).
+- Les liens expirés ou révoqués sont supprimés de la base 30 jours plus tard, avec leur journal d'accès.
+
 ### Et Portainer ?
 
 Toutes les images sont désormais téléchargeables : la stack est entièrement gérable depuis Portainer. Déclare le registre une fois (**Registries** > **Add registry** > **Custom registry**, URL `ghcr.io`, utilisateur `dockev03`, mot de passe : le token `read:packages`), puis crée la stack depuis le dépôt Git (**Stacks** > **Add stack** > **Repository**, chemin `deploy/docker-compose.yml`) en saisissant les variables de `.env.example`.
