@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from
 import { useRoute, useRouter } from 'vue-router'
 import { listDocumentIds, listDocuments, thumbnailUrl, type DocumentSummary } from '../api/documents'
 import { ApiError } from '../api/http'
+import BulkActions from '../components/BulkActions.vue'
 import FilterBar from '../components/FilterBar.vue'
 import TagBadge from '../components/TagBadge.vue'
 import { MOBILE_QUERY, useMediaQuery } from '../composables/mediaQuery'
@@ -14,7 +15,10 @@ import { useDocumentListStore } from '../stores/documentList'
 import { usePreferencesStore, type DisplayChoice } from '../stores/preferences'
 import { useReferencesStore } from '../stores/references'
 
-/** Liste des documents (UI-02) : vignettes, détails ou tableau ; filtres dans l'URL (UI-03). */
+/**
+ * Liste des documents (UI-02) : vignettes, détails ou tableau ; filtres dans l'URL (UI-03) ;
+ * sélection multiple et actions en masse (UI-06).
+ */
 const PAGE_SIZE = 25
 
 const route = useRoute()
@@ -110,6 +114,49 @@ async function loadIds() {
 }
 watch(() => JSON.stringify(filters.value), loadIds)
 
+// Sélection multiple (UI-06) : vidée quand les filtres changent (elle ne correspondrait plus à la liste).
+const selected = ref<number[]>([])
+const selectedSet = computed(() => new Set(selected.value))
+const notice = ref<string | null>(null)
+const pageSelected = computed(() => documents.value.length > 0 && documents.value.every((doc) => selectedSet.value.has(doc.id)))
+watch(
+  () => JSON.stringify(filters.value),
+  () => (selected.value = []),
+)
+
+function toggle(id: number) {
+  selected.value = selectedSet.value.has(id) ? selected.value.filter((value) => value !== id) : [...selected.value, id]
+}
+
+function selectPage() {
+  selected.value = [...new Set([...selected.value, ...documents.value.map((doc) => doc.id)])]
+}
+
+function togglePage() {
+  if (pageSelected.value) {
+    const page = new Set(documents.value.map((doc) => doc.id))
+    selected.value = selected.value.filter((id) => !page.has(id))
+  } else selectPage()
+}
+
+/** Tous les résultats : identifiants déjà chargés pour précédent / suivant, sinon redemandés. */
+async function selectAll() {
+  if (list.ids.length === count.value) {
+    selected.value = [...list.ids]
+    return
+  }
+  await loadIds()
+  selected.value = list.ids.length ? [...list.ids] : selected.value
+}
+
+function applied(message: string, modified: boolean) {
+  notice.value = message
+  if (!modified) return
+  selected.value = []
+  reload()
+  void loadIds()
+}
+
 function updateFilters(next: DocumentFilters) {
   // Nouveaux filtres : retour en haut de la première page (le paramètre page disparaît).
   void router.replace({ query: toQuery(next) })
@@ -172,6 +219,21 @@ onMounted(() => {
 
     <FilterBar :model-value="filters" @update:model-value="updateFilters" />
 
+    <BulkActions
+      v-if="selected.length && !mobile"
+      :selected="selected"
+      :count="count"
+      @select-page="selectPage"
+      @select-all="selectAll"
+      @clear="selected = []"
+      @applied="applied"
+    />
+
+    <div v-if="notice" class="alert alert-success alert-dismissible mb-0" role="status">
+      {{ notice }}
+      <button type="button" class="btn-close" aria-label="Fermer" @click="notice = null" />
+    </div>
+
     <p class="compteur text-body-secondary" aria-live="polite">
       <template v-if="loadedPage > 0">{{ count }} document{{ count > 1 ? 's' : '' }}</template>
       <span v-if="loading" class="spinner-border spinner-border-sm ms-2" role="status">
@@ -192,7 +254,22 @@ onMounted(() => {
 
     <!-- Vignettes -->
     <ul v-if="preferences.display === 'vignettes'" class="vignettes list-unstyled">
-      <li v-for="doc in documents" :key="doc.id" class="card h-100" :data-document="doc.id">
+      <li
+        v-for="doc in documents"
+        :key="doc.id"
+        class="card h-100"
+        :class="{ 'border-primary choisi': selectedSet.has(doc.id) }"
+        :data-document="doc.id"
+      >
+        <label class="choix" @click.stop>
+          <input
+            type="checkbox"
+            class="form-check-input"
+            :checked="selectedSet.has(doc.id)"
+            :aria-label="`Sélectionner « ${doc.title} »`"
+            @change="toggle(doc.id)"
+          />
+        </label>
         <img class="card-img-top apercu" :src="thumbnailUrl(doc.id)" alt="" loading="lazy" />
         <div class="card-body p-2">
           <p class="card-title titre mb-1">
@@ -206,7 +283,22 @@ onMounted(() => {
 
     <!-- Détails -->
     <ul v-else-if="preferences.display === 'details'" class="details list-unstyled">
-      <li v-for="doc in documents" :key="doc.id" class="card" :data-document="doc.id">
+      <li
+        v-for="doc in documents"
+        :key="doc.id"
+        class="card"
+        :class="{ 'border-primary choisi': selectedSet.has(doc.id) }"
+        :data-document="doc.id"
+      >
+        <label class="choix" @click.stop>
+          <input
+            type="checkbox"
+            class="form-check-input"
+            :checked="selectedSet.has(doc.id)"
+            :aria-label="`Sélectionner « ${doc.title} »`"
+            @change="toggle(doc.id)"
+          />
+        </label>
         <div class="d-flex">
           <img class="apercu-details" :src="thumbnailUrl(doc.id)" alt="" loading="lazy" />
           <div class="card-body py-2">
@@ -238,6 +330,16 @@ onMounted(() => {
       <table class="table table-hover align-middle tableau">
         <thead>
           <tr>
+            <th scope="col" class="colonne-choix">
+              <input
+                type="checkbox"
+                class="form-check-input"
+                :checked="pageSelected"
+                :disabled="documents.length === 0"
+                aria-label="Sélectionner les documents affichés"
+                @change="togglePage"
+              />
+            </th>
             <th scope="col">N°</th>
             <th scope="col">Correspondant</th>
             <th scope="col">Titre</th>
@@ -248,7 +350,21 @@ onMounted(() => {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="doc in documents" :key="doc.id" :data-document="doc.id">
+          <tr
+            v-for="doc in documents"
+            :key="doc.id"
+            :class="{ 'table-active': selectedSet.has(doc.id) }"
+            :data-document="doc.id"
+          >
+            <td class="colonne-choix">
+              <input
+                type="checkbox"
+                class="form-check-input"
+                :checked="selectedSet.has(doc.id)"
+                :aria-label="`Sélectionner « ${doc.title} »`"
+                @change="toggle(doc.id)"
+              />
+            </td>
             <td>{{ doc.archive_serial_number ?? '' }}</td>
             <td>{{ nameOf(references.correspondants, doc.correspondent) ?? '' }}</td>
             <td class="titre">
@@ -267,6 +383,18 @@ onMounted(() => {
     <div v-if="mobile && hasMore && !error" ref="sentinel" class="suite">
       <button type="button" class="btn btn-outline-secondary" :disabled="loading" @click="loadMore">Afficher plus</button>
     </div>
+
+    <!-- Mobile : barre de la sélection en bas de l'écran, à portée de pouce. -->
+    <BulkActions
+      v-if="selected.length && mobile"
+      bottom
+      :selected="selected"
+      :count="count"
+      @select-page="selectPage"
+      @select-all="selectAll"
+      @clear="selected = []"
+      @applied="applied"
+    />
 
     <!-- PC : pagination. -->
     <nav v-if="!mobile && pageCount > 1" aria-label="Pagination">
@@ -334,6 +462,35 @@ onMounted(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 0.25rem;
+}
+
+/* Case de sélection au-dessus du lien étiré de la carte, zone tactile de 44 px. */
+.choix {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  cursor: pointer;
+}
+
+.choix .form-check-input {
+  margin: 0;
+  width: 1.25rem;
+  height: 1.25rem;
+  box-shadow: 0 0 0 2px var(--bs-body-bg);
+}
+
+.choisi {
+  box-shadow: 0 0 0 1px var(--bs-primary);
+}
+
+.colonne-choix {
+  width: 2.5rem;
 }
 
 .vignettes {

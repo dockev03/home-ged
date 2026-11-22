@@ -1,4 +1,4 @@
-import { ANTI_FORGERY_HEADER, ApiError, getJson, sendJson } from './http'
+import { ANTI_FORGERY_HEADER, ApiError, getJson, postForFile, sendJson } from './http'
 
 /** Document tel que renvoyé par la liste Paperless (champs utilisés par Home-GED). */
 export interface DocumentSummary {
@@ -288,3 +288,29 @@ export interface CreateReference {
 
 export const createReference = <K extends CreatableKind>(kind: K, body: CreateReference) =>
   sendJson<References[K][number]>('POST', `/api/references/${kind}`, body)
+
+/** Action en masse (UI-06), au format bulk_edit de Paperless ; le BFF n'accepte que celles-ci. */
+export type BulkAction =
+  | { method: 'modify_tags'; parameters: { add_tags: number[]; remove_tags: number[] } }
+  | { method: 'set_correspondent'; parameters: { correspondent: number | null } }
+  | { method: 'set_document_type'; parameters: { document_type: number | null } }
+  | { method: 'set_storage_path'; parameters: { storage_path: number | null } }
+  | {
+      method: 'modify_custom_fields'
+      parameters: { add_custom_fields: CustomFieldValue[]; remove_custom_fields: number[] }
+    }
+  | {
+      method: 'set_permissions'
+      parameters: { owner: number | null; set_permissions: DocumentPermissions['permissions']; merge: boolean }
+    }
+  | { method: 'delete'; parameters: Record<string, never> }
+
+/** Applique l'action à tous les documents ; Paperless refuse l'ensemble si l'un n'est pas modifiable. */
+export const bulkEdit = (documents: number[], action: BulkAction) =>
+  sendJson('POST', '/api/documents/actions', { documents, ...action })
+
+/** Contenu de l'archive : PDF d'archive (OCR), fichiers d'origine, ou les deux. */
+export type ArchiveContent = 'archive' | 'originaux' | 'les_deux'
+
+export const bulkDownload = (documents: number[], contenu: ArchiveContent) =>
+  postForFile('/api/documents/telechargement', { documents, contenu })

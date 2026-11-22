@@ -8,8 +8,8 @@ using HomeGed.Api.Hosting;
 namespace HomeGed.Api.Documents;
 
 /// <summary>
-/// Relais vers Paperless pour la liste des documents, ses filtres (UI-02, UI-03) et la fiche
-/// document (UI-04, UI-05). Chaque appel part avec le token de l'utilisateur : Paperless applique
+/// Relais vers Paperless pour la liste des documents, ses filtres (UI-02, UI-03), les actions en
+/// masse (UI-06) et la fiche document (UI-04, UI-05). Chaque appel part avec le token de l'utilisateur : Paperless applique
 /// ses droits. Seuls les paramètres et les champs connus sont transmis.
 /// </summary>
 public static class DocumentEndpoints
@@ -65,6 +65,8 @@ public static class DocumentEndpoints
     {
         api.MapGet("/documents", ListAsync);
         api.MapGet("/documents/ids", IdsAsync);
+        api.MapPost("/documents/actions", BulkEditAsync);
+        api.MapPost("/documents/telechargement", BulkDownloadAsync);
         api.MapGet("/documents/{id:int}", GetAsync);
         api.MapPatch("/documents/{id:int}", UpdateAsync);
         api.MapDelete("/documents/{id:int}", DeleteAsync);
@@ -175,6 +177,44 @@ public static class DocumentEndpoints
             (_, _) => Task.FromResult<IResult?>(TypedResults.NoContent()),
             cancellationToken))!;
 
+    /// <summary>
+    /// Action en masse (UI-06) : Paperless vérifie les droits de l'utilisateur sur chaque document
+    /// et refuse l'ensemble si l'un d'eux n'est pas modifiable. Une suppression place les documents
+    /// dans la corbeille de Paperless.
+    /// </summary>
+    private static async Task<IResult> BulkEditAsync(
+        JsonNode? body, HttpContext context, PaperlessRelay relay, CancellationToken cancellationToken)
+    {
+        var (request, error) = BulkEdit.Sanitize(body);
+        if (request is null)
+        {
+            return PaperlessRelay.Problem(HttpStatusCode.BadRequest, error!, "requete_invalide");
+        }
+
+        return (await relay.SendAsync(
+            context, HttpMethod.Post, "api/documents/bulk_edit/", request,
+            (_, _) => Task.FromResult<IResult?>(TypedResults.NoContent()),
+            cancellationToken,
+            onError: status => status == HttpStatusCode.Forbidden
+                ? PaperlessRelay.Problem(
+                    HttpStatusCode.Forbidden,
+                    "Vous n'avez pas le droit de faire cette action sur tous les documents sélectionnés : aucun n'a été modifié.",
+                    "acces_refuse")
+                : null))!;
+    }
+
+    /// <summary>Archive zip des documents sélectionnés, relayée en flux (UI-06).</summary>
+    private static async Task<IResult> BulkDownloadAsync(
+        JsonNode? body, HttpContext context, PaperlessRelay relay, CancellationToken cancellationToken)
+    {
+        var (request, error) = BulkEdit.SanitizeDownload(body);
+        return request is null
+            ? PaperlessRelay.Problem(HttpStatusCode.BadRequest, error!, "requete_invalide")
+            : await StreamAsync(
+                context, relay, "api/documents/bulk_download/", "private, no-store", framable: false, cancellationToken,
+                HttpMethod.Post, request);
+    }
+
     private static Task<IResult> ThumbnailAsync(int id, HttpContext context, PaperlessRelay relay, CancellationToken cancellationToken) =>
         StreamAsync(context, relay, Path(id, "thumb/"), "private, max-age=600", framable: false, cancellationToken);
 
@@ -209,9 +249,16 @@ public static class DocumentEndpoints
     }
 
     private static async Task<IResult> StreamAsync(
-        HttpContext context, PaperlessRelay relay, string uri, string cacheControl, bool framable, CancellationToken cancellationToken) =>
+        HttpContext context,
+        PaperlessRelay relay,
+        string uri,
+        string cacheControl,
+        bool framable,
+        CancellationToken cancellationToken,
+        HttpMethod? method = null,
+        JsonObject? body = null) =>
         (await relay.SendAsync(
-            context, HttpMethod.Get, uri, null,
+            context, method ?? HttpMethod.Get, uri, body,
             async (response, ct) =>
             {
                 var content = response.Content.Headers;

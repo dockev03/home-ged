@@ -297,4 +297,60 @@ public sealed class DocumentRelayIntegrationTests(HomeGedAppFixture app) : IClas
         Assert.Equal(HttpStatusCode.NoContent, deleted.StatusCode);
         Assert.Equal(1, (await app.GetJsonAsync($"/api/documents/{app.DocumentId}")).GetProperty("versions").GetArrayLength());
     }
+
+    [Fact]
+    public async Task Actions_en_masse_et_telechargement_groupe()
+    {
+        using var created = await app.SendAsync(HttpMethod.Post, "/api/references/tags", new { name = "Masse " + app.Marker, color = "#33a02c" });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var tag = JsonElement.Parse(await created.Content.ReadAsStringAsync()).GetProperty("id").GetInt32();
+
+        using var added = await app.SendAsync(HttpMethod.Post, "/api/documents/actions", new
+        {
+            documents = new[] { app.DocumentId },
+            method = "modify_tags",
+            parameters = new { add_tags = new[] { tag }, remove_tags = Array.Empty<int>() },
+        });
+        Assert.Equal(HttpStatusCode.NoContent, added.StatusCode);
+        Assert.Contains(tag, (await app.GetJsonAsync($"/api/documents/{app.DocumentId}")).GetProperty("tags").EnumerateArray().Select(t => t.GetInt32()));
+
+        using var removed = await app.SendAsync(HttpMethod.Post, "/api/documents/actions", new
+        {
+            documents = new[] { app.DocumentId },
+            method = "modify_tags",
+            parameters = new { add_tags = Array.Empty<int>(), remove_tags = new[] { tag } },
+        });
+        Assert.Equal(HttpStatusCode.NoContent, removed.StatusCode);
+        Assert.DoesNotContain(tag, (await app.GetJsonAsync($"/api/documents/{app.DocumentId}")).GetProperty("tags").EnumerateArray().Select(t => t.GetInt32()));
+
+        using var correspondent = await app.SendAsync(HttpMethod.Post, "/api/documents/actions", new
+        {
+            documents = new[] { app.DocumentId },
+            method = "set_correspondent",
+            parameters = new { correspondent = (int?)null },
+        });
+        Assert.Equal(HttpStatusCode.NoContent, correspondent.StatusCode);
+
+        using var permissions = await app.SendAsync(HttpMethod.Post, "/api/documents/actions", new
+        {
+            documents = new[] { app.DocumentId },
+            method = "set_permissions",
+            parameters = new
+            {
+                owner = app.UserId,
+                merge = true,
+                set_permissions = new
+                {
+                    view = new { users = Array.Empty<int>(), groups = Array.Empty<int>() },
+                    change = new { users = Array.Empty<int>(), groups = Array.Empty<int>() },
+                },
+            },
+        });
+        Assert.Equal(HttpStatusCode.NoContent, permissions.StatusCode);
+
+        using var zip = await app.SendAsync(HttpMethod.Post, "/api/documents/telechargement", new { documents = new[] { app.DocumentId }, contenu = "originaux" });
+        Assert.Equal(HttpStatusCode.OK, zip.StatusCode);
+        Assert.Equal("application/zip", zip.Content.Headers.ContentType!.MediaType);
+        Assert.Equal("PK"u8.ToArray(), (await zip.Content.ReadAsByteArrayAsync())[..2]);
+    }
 }

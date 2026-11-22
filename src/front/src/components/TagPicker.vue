@@ -6,7 +6,7 @@ import { useReferencesStore } from '../stores/references'
 import TagBadge from './TagBadge.vue'
 
 /** Étiquettes du document : retrait d'un clic, ajout par liste, création à la volée (UI-05). */
-const props = defineProps<{ id: string; disabled?: boolean }>()
+const props = defineProps<{ id: string; disabled?: boolean; /** Libellé du champ (« Étiquettes » par défaut). */ label?: string }>()
 const model = defineModel<number[]>({ required: true })
 
 const references = useReferencesStore()
@@ -66,7 +66,7 @@ async function create() {
 
 <template>
   <div>
-    <label class="form-label" :for="id">Étiquettes</label>
+    <label class="form-label" :for="id">{{ label ?? 'Étiquettes' }}</label>
     <ul class="choisies list-unstyled" aria-label="Étiquettes du document">
       <li v-for="tag in selected" :key="tag.id">
         <button

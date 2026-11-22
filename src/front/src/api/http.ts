@@ -74,6 +74,22 @@ export async function sendJson<T = null>(
   return (text ? JSON.parse(text) : null) as T
 }
 
+/** POST JSON dont la réponse est un fichier (archive zip) : renvoie son contenu et son nom. */
+export async function postForFile(path: string, body: unknown): Promise<{ blob: Blob; fileName: string | null }> {
+  const response = await send(
+    path,
+    {
+      method: 'POST',
+      headers: { Accept: '*/*', 'Content-Type': 'application/json', ...ANTI_FORGERY_HEADER },
+      body: JSON.stringify(body),
+    },
+    {},
+  )
+  const disposition = response.headers.get('Content-Disposition') ?? ''
+  const fileName = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition)?.[1] ?? null
+  return { blob: await response.blob(), fileName: fileName ? decodeURIComponent(fileName) : null }
+}
+
 export interface AppInfo {
   version: string
 }

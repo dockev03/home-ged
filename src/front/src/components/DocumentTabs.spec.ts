@@ -122,7 +122,7 @@ describe('onglet Permissions', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('Seul le propriétaire du document peut modifier')
-    expect(wrapper.find('#proprietaire').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('#fiche-proprietaire').attributes('disabled')).toBeDefined()
     expect(wrapper.text()).not.toContain('Enregistrer les permissions')
   })
 

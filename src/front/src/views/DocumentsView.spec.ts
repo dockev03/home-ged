@@ -1,6 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import FilterBar from '../components/FilterBar.vue'
 import { defaultFilters } from '../filters/documentFilters'
@@ -202,5 +202,151 @@ describe('DocumentsView', () => {
     stubBff(0)
     const { wrapper } = await mountView('/documents?q=introuvable')
     expect(wrapper.text()).toContain('Aucun document ne correspond à ces filtres.')
+  })
+
+  describe('sélection multiple et actions en masse (UI-06)', () => {
+    /** Faux BFF complet : identifiants de tous les résultats et routes des actions en masse. */
+    function stubActions(count: number, actions: { status?: number; body?: unknown } = {}) {
+      const base = stubBff(count).getMockImplementation()!
+      const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(async (input) => {
+        const url = new URL(String(input), 'http://localhost')
+        if (url.pathname === '/api/documents/ids') return Response.json(Array.from({ length: count }, (_, i) => i + 1))
+        if (url.pathname === '/api/documents/actions') {
+          return actions.status
+            ? Response.json(actions.body ?? {}, { status: actions.status })
+            : new Response(null, { status: 204 })
+        }
+        if (url.pathname === '/api/documents/telechargement') {
+          return new Response('PK', {
+            headers: { 'Content-Type': 'application/zip', 'Content-Disposition': 'attachment; filename="documents.zip"' },
+          })
+        }
+        return base(input)
+      })
+      vi.stubGlobal('fetch', fetchMock)
+      return fetchMock
+    }
+
+    const posts = (fetchMock: ReturnType<typeof stubActions>, path: string) =>
+      fetchMock.mock.calls
+        .filter(([input, init]) => String(input) === path && init?.method === 'POST')
+        .map(([, init]) => JSON.parse(String(init!.body)))
+
+    async function openAction(wrapper: Awaited<ReturnType<typeof mountView>>['wrapper'], action: string) {
+      await wrapper.find('[aria-label="Actions sur la sélection"]').trigger('click')
+      await wrapper.find(`[data-action="${action}"]`).trigger('click')
+      await flushPromises()
+    }
+
+    const confirm = (wrapper: Awaited<ReturnType<typeof mountView>>['wrapper'], label: string) =>
+      wrapper.findAll('.modal-footer button').find((b) => b.text() === label)!
+
+    it("cocher un document affiche la barre, qui disparaît quand la sélection est vide", async () => {
+      stubActions(3)
+      const { wrapper } = await mountView()
+      expect(wrapper.find('[aria-label="Sélection"]').exists()).toBe(false)
+
+      await wrapper.find('[data-document="2"] input[type="checkbox"]').setValue(true)
+      expect(wrapper.find('[aria-label="Sélection"]').text()).toContain('1 sélectionné sur 3')
+      expect(wrapper.find('[data-document="2"]').classes()).toContain('choisi')
+
+      await wrapper.find('[data-document="2"] input[type="checkbox"]').setValue(false)
+      expect(wrapper.find('[aria-label="Sélection"]').exists()).toBe(false)
+    })
+
+    it('sélectionne tous les résultats, puis ajoute une étiquette et recharge la liste', async () => {
+      const fetchMock = stubActions(30)
+      const { wrapper } = await mountView()
+      await wrapper.find('[data-document="1"] input[type="checkbox"]').setValue(true)
+
+      await wrapper.find('[aria-label="Sélectionner"]').trigger('click')
+      await wrapper.findAll('.dropdown-item').find((b) => b.text().startsWith('Tous les résultats'))!.trigger('click')
+      await flushPromises()
+      expect(wrapper.find('[aria-label="Sélection"]').text()).toContain('30 sélectionnés')
+
+      await openAction(wrapper, 'tags')
+      expect(confirm(wrapper, 'Appliquer').attributes('disabled')).toBeDefined()
+      await wrapper.find('#masse-ajout-etiquettes').setValue('1')
+      const loads = documentCalls(fetchMock).length
+      await confirm(wrapper, 'Appliquer').trigger('click')
+      await flushPromises()
+
+      const [body] = posts(fetchMock, '/api/documents/actions')
+      expect(body.documents).toHaveLength(30)
+      expect(body).toMatchObject({ method: 'modify_tags', parameters: { add_tags: [1], remove_tags: [] } })
+      expect(wrapper.find('.modal').exists()).toBe(false)
+      expect(wrapper.find('.alert-success').text()).toContain('30 documents modifiés.')
+      expect(wrapper.find('[aria-label="Sélection"]').exists()).toBe(false)
+      expect(documentCalls(fetchMock).length).toBe(loads + 1)
+    })
+
+    it('supprime après confirmation explicite', async () => {
+      const fetchMock = stubActions(3)
+      const { wrapper } = await mountView()
+      await wrapper.find('[data-document="1"] input[type="checkbox"]').setValue(true)
+      await wrapper.find('[data-document="3"] input[type="checkbox"]').setValue(true)
+
+      await openAction(wrapper, 'supprimer')
+      expect(wrapper.find('.modal').text()).toContain('2 documents seront placés dans la corbeille')
+      expect(posts(fetchMock, '/api/documents/actions')).toHaveLength(0)
+      await confirm(wrapper, 'Supprimer').trigger('click')
+      await flushPromises()
+
+      expect(posts(fetchMock, '/api/documents/actions')).toEqual([{ documents: [1, 3], method: 'delete', parameters: {} }])
+      expect(wrapper.find('.alert-success').text()).toContain('2 documents placés dans la corbeille.')
+    })
+
+    it('affiche le refus de Paperless dans la fenêtre et garde la sélection', async () => {
+      stubActions(3, { status: 403, body: { title: "Vous n'avez pas le droit de faire cette action.", code: 'acces_refuse' } })
+      const { wrapper } = await mountView()
+      await wrapper.find('[data-document="1"] input[type="checkbox"]').setValue(true)
+
+      await openAction(wrapper, 'correspondants')
+      await wrapper.find('#masse-correspondants').setValue('4')
+      await confirm(wrapper, 'Appliquer').trigger('click')
+      await flushPromises()
+
+      expect(wrapper.find('.modal [role="alert"]').text()).toContain("Vous n'avez pas le droit")
+      expect(wrapper.find('[aria-label="Sélection"]').text()).toContain('1 sélectionné')
+    })
+
+    it("télécharge l'archive de la sélection sans la vider", async () => {
+      const fetchMock = stubActions(3)
+      const createObjectURL = vi.fn(() => 'blob:archive')
+      const original = { create: URL.createObjectURL, revoke: URL.revokeObjectURL }
+      URL.createObjectURL = createObjectURL
+      URL.revokeObjectURL = vi.fn()
+      onTestFinished(() => {
+        URL.createObjectURL = original.create
+        URL.revokeObjectURL = original.revoke
+      })
+      const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+      const { wrapper } = await mountView()
+      await wrapper.find('[data-document="2"] input[type="checkbox"]').setValue(true)
+
+      await openAction(wrapper, 'telecharger')
+      await wrapper.find('#masse-originaux').setValue(true)
+      await confirm(wrapper, 'Télécharger').trigger('click')
+      await flushPromises()
+
+      expect(posts(fetchMock, '/api/documents/telechargement')).toEqual([{ documents: [2], contenu: 'originaux' }])
+      expect(createObjectURL).toHaveBeenCalled()
+      expect(click).toHaveBeenCalled()
+      expect(wrapper.find('[aria-label="Sélection"]').exists()).toBe(true)
+      click.mockRestore()
+    })
+
+    it('la case de l’en-tête du tableau coche la page, un nouveau filtre vide la sélection', async () => {
+      stubActions(3)
+      usePreferencesStore().display = 'tableau'
+      const { wrapper } = await mountView()
+
+      await wrapper.find('thead input[type="checkbox"]').setValue(true)
+      expect(wrapper.find('[aria-label="Sélection"]').text()).toContain('3 sélectionnés')
+
+      wrapper.findComponent(FilterBar).vm.$emit('update:modelValue', { ...defaultFilters(), correspondants: [4] })
+      await flushPromises()
+      expect(wrapper.find('[aria-label="Sélection"]').exists()).toBe(false)
+    })
   })
 })
