@@ -144,10 +144,13 @@ public static class HomeGedApp
         api.Map("/{**rest}", () => Results.Problem(statusCode: (int)HttpStatusCode.NotFound)).AllowAnonymous();
 
         // Front Vue buildé (wwwroot) : fichiers fingerprintés en cache long, index.html jamais en cache.
+        // Le worker de recadrage reçoit sa CSP ici, pour un fichier réellement servi seulement (jamais
+        // pour index.html renvoyé par le repli).
         app.UseStaticFiles(new StaticFileOptions
         {
             OnPrepareResponse = ctx =>
             {
+                SecurityHeaders.ApplyScanWorkerPolicy(ctx.Context);
                 var path = ctx.Context.Request.Path;
                 ctx.Context.Response.Headers.CacheControl =
                     path.StartsWithSegments("/assets", StringComparison.Ordinal)

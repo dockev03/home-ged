@@ -111,7 +111,7 @@ Les codes reprennent la grille de fonctionnalités validée (`FCT_HGED.xlsx`).
 | SCAN-05 | Assemblage en un seul PDF côté client, puis envoi à Paperless (qui fait l'OCR) | V1 |
 | SCAN-06 | Saisie optionnelle avant envoi : titre, personne, tags | V1 |
 
-Traitement **100 % côté navigateur** (OpenCV.js / jscanify et pdf-lib) : aucune image intermédiaire stockée sur le serveur.
+Traitement **100 % côté navigateur** (OpenCV.js / jscanify, et générateur PDF maison) : aucune image intermédiaire stockée sur le serveur. Le PDF intègre les pages JPEG telles quelles (sans recompression) ; pdf-lib, envisagé au départ, n'est plus maintenu depuis 2021.
 
 #### F-SHARE — Liens de partage protégés (G3)
 
@@ -164,7 +164,7 @@ ged.<domaine>   paperless.<domaine>
 |---|---|
 | Front | **Vue 3** + TypeScript + Vite, Vue Router, Pinia, `vite-plugin-pwa` (Workbox) |
 | UI | **Bootstrap 5** (MIT), même base que l'interface Paperless pour un rendu proche |
-| Scan | OpenCV.js / jscanify (bords et perspective), pdf-lib (assemblage PDF) |
+| Scan | OpenCV.js / jscanify (bords et perspective), générateur PDF maison (assemblage des pages JPEG, sans dépendance) |
 | Back | **ASP.NET Core (.NET 10 LTS)**, API minimales, pattern BFF |
 | Données | PostgreSQL (base `homeged` dédiée, même instance que Paperless), EF Core |
 | Client Paperless | `HttpClient` typé, version d'API figée via l'en-tête `Accept` |
@@ -229,7 +229,7 @@ Home-GED ne stocke **aucune donnée de document** (Paperless est la seule source
 | **1 (MVP)** ✅ | POC d'authentification (2FA), squelette Home-GED (Vue et .NET), CI et image GHCR, connexion ; coque, liste et filtres (UI-01 à 03) ; fiche document (UI-04, 05 : détails modifiables, contenu, métadonnées, notes, historique, permissions, versions, aperçu) ; sélection multiple et actions en masse, upload, PWA installable, thème sombre (UI-06, PWA-01 à 03, PWA-07) | Interface quotidienne à l'ergonomie Paperless : consulter, rechercher, classer, ajouter |
 | **2** ✅ | Gérer, vues sauvegardées, tableau de bord, corbeille, documents ouverts, suggestions (UI-07 à 12) | Plus besoin de l'interface Paperless hors administration |
 | **3** ✅ | Liens de partage protégés (SHARE-01 à 07) | Partage sécurisé |
-| **4** | Capture caméra (SCAN-01 à 06) | Scan depuis le téléphone |
+| **4** ✅ | Capture caméra (SCAN-01 à 06) | Scan depuis le téléphone |
 | **5** | Hors-ligne, Share Target (PWA-09 à 11) ; préparation à la mise en production (tests d'intégration Paperless en CI, critères du §7 sur iPhone et Android, revue de sécurité) | V1 complète, en production |
 | **V2** | IA (Ollama) exposée dans la PWA, notification de premier accès aux liens | — |
 
