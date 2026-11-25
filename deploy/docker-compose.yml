@@ -8,7 +8,8 @@
 #
 # Aucun port n'est publié sur l'hôte : seul Nginx Proxy Manager joint Home-GED et
 # Paperless, via le réseau Docker externe `${NPM_NETWORK}`.
-# Images Home-GED : publiées par la CI sur GHCR (paquets privés, voir docs/deploiement).
+# Images Home-GED : publiées par la CI sur GHCR (paquets privés, linux/amd64) à
+# chaque tag de version vX.Y.Z sur main ; HOMEGED_VERSION choisit la version.
 
 name: home-ged
 

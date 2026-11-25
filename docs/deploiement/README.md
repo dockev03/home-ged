@@ -13,7 +13,7 @@
 | `app` | `ghcr.io/dockev03/home-ged` | Home-GED : PWA et BFF (seul service exposé à Internet) |
 | `backup` | `ghcr.io/dockev03/home-ged-backup` | `pg_dump` + restic vers le NAS, chaque nuit |
 
-Les deux images Home-GED sont construites par la CI GitHub (`.github/workflows/release.yml`) à chaque push sur `main` et à chaque tag `vX.Y.Z`. La variable `HOMEGED_VERSION` choisit le tag déployé : `main`, `sha-xxxxxxx` ou une version (`1.0.0`).
+Les deux images Home-GED sont construites par la CI GitHub (`.github/workflows/release.yml`) uniquement pour un tag de version `vX.Y.Z` posé sur `main`, en `linux/amd64`. La variable `HOMEGED_VERSION` choisit le tag déployé : une version figée (`1.0.0`, recommandé), la dernière corrective d'une version (`1.0`) ou la dernière version stable (`latest`).
 
 Paperless est figé en version exacte. PostgreSQL et Valkey sont figés en version majeure, comme dans la configuration officielle de Paperless. Les mises à jour se font volontairement, après lecture du changelog.
 
@@ -147,7 +147,9 @@ sudo docker compose pull app backup && sudo docker compose up -d
 
 Avec Portainer : ouvre la stack, puis **Update the stack** en cochant **Re-pull image and redeploy** (ou **Pull and redeploy** pour une stack liée au dépôt Git).
 
-Avec `HOMEGED_VERSION=main`, cela prend le dernier build de `main`. Pour figer une version, mets un tag (`1.0.0`) ou un `sha-xxxxxxx`.
+Pour passer à une nouvelle version, change d'abord `HOMEGED_VERSION` (`.env` ou variables de la stack Portainer), par exemple `1.0.0` → `1.1.0`, après lecture de ses notes de version. Avec `1.0` ou `latest`, un simple pull suffit à prendre la dernière version publiée correspondante. Pour revenir en arrière, remets l'ancienne version.
+
+> Les tags d'image `main` et `sha-xxxxxxx` ne sont plus publiés : une installation qui a encore `HOMEGED_VERSION=main` reste figée sur le dernier build de `main`. Passe-la sur une version (`1.0.0`).
 
 ## Mettre à jour Paperless
 
