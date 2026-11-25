@@ -1,12 +1,11 @@
-# Publication Home-GED : rejoue la CI, puis publie les images sur GHCR.
-# Uniquement sur main (merge de DEV) et sur les tags de version.
+# Publication Home-GED : rejoue la CI, puis publie les images sur GHCR (linux/amd64).
+# Uniquement sur un tag de version vX.Y.Z posé sur un commit de main :
+# un simple push sur main ne publie rien (règles de version : CLAUDE.md).
 name: Release
 
 on:
   push:
-    branches: [main]
-    tags: ["v*"]
-  workflow_dispatch:
+    tags: ["v*.*.*"]
 
 permissions:
   contents: read
@@ -16,8 +15,24 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  verifier-tag:
+    name: Tag sur main
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Le commit tagué doit appartenir à main
+        run: |
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Le tag $GITHUB_REF_NAME ne pointe pas sur un commit de main : aucune image publiée."
+            exit 1
+          fi
+
   ci:
     name: CI
+    needs: [verifier-tag]
     uses: ./.github/workflows/ci.yml
     with:
       docker-check: "false"
@@ -47,16 +62,18 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image.name }}
-          # main → « main » et « sha-xxxxxxx » ; tag v1.2.3 → « 1.2.3 » et « 1.2 ».
+          # Tag v1.2.3 → « 1.2.3 », « 1.2 » et « latest » (latest : versions stables
+          # uniquement, jamais une préversion comme v1.3.0-rc.1).
+          flavor: latest=false
           tags: |
-            type=ref,event=branch
-            type=sha
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
       - uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.image.context }}
           file: ${{ matrix.image.file }}
+          platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

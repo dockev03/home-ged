@@ -20,7 +20,21 @@ Home-GED : surcouche web (PWA mobile-first) au-dessus de **Paperless-ngx 3.x**, 
 ## Git
 
 - Branches de travail `feature/etape-N-sujet`, `feature/`, `fix/` ou `docs/sujet`, créées depuis `DEV`, jamais réutilisées.
-- Flux : branche de travail → PR vers `DEV` (CI : tests, audits, build Docker sans publication) → PR `DEV` → `main` (publication des images GHCR).
+- Flux : branche de travail → PR vers `DEV` (CI : tests, audits, build Docker sans publication) → PR `DEV` → `main` → tag `vX.Y.Z` (publication des images GHCR, voir Versions).
 - Jamais de commit direct sur `DEV`, `main`, `master` ou `staging`.
 - Aucun commit ni push sans accord explicite ; présenter le message (Conventional Commits en français) avant.
 - Aucun identifiant de modèle d'IA dans commits, PR ou fichiers (pas de `Co-Authored-By` d'IA).
+
+## Versions
+
+- SemVer `vX.Y.Z`. Le tag est la seule voie de publication des images GHCR (`release.yml`, `linux/amd64`) : un push sur `main` sans tag ne publie rien.
+- Tag annoté posé **uniquement sur `main`**, juste après le merge d'une PR `DEV` → `main` dont la CI est verte. Un tag hors `main` est refusé par la CI.
+- Quand taguer et quel numéro :
+  - `MAJOR` : rupture de déploiement (variable obligatoire ajoutée ou renommée, étape manuelle, migration non rétrocompatible, compose à reprendre).
+  - `MINOR` : fin d'un lot ou d'une étape du cahier des charges livrée dans `main`.
+  - `PATCH` : correctifs seuls (`fix/`, Dependabot), sans nouvelle fonctionnalité.
+  - Préversion `vX.Y.Z-rc.N` pour un essai sur le VPS : publiée, mais jamais en `latest`.
+- Pas de tag pour un merge `docs/` seul.
+- À chaque merge `DEV` → `main`, proposer le numéro du tag suivant avec sa justification ; ne jamais poser ni pousser un tag sans accord.
+- Commande : `git tag -a vX.Y.Z -m "vX.Y.Z — résumé" origin/main` puis `git push origin vX.Y.Z`. Mettre à jour `HOMEGED_VERSION` sur le VPS ensuite.
+- Un tag publié n'est jamais déplacé ni supprimé : corriger par une nouvelle version.
