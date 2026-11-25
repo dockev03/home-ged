@@ -33,8 +33,8 @@ jobs:
     name: Back (.NET)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-dotnet@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: "10.0.x"
       - run: dotnet restore HomeGed.slnx
@@ -51,8 +51,8 @@ jobs:
       run:
         working-directory: src/front
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
@@ -97,8 +97,8 @@ jobs:
           --health-cmd "curl -fs http://localhost:8000/ -o /dev/null"
           --health-interval 10s --health-timeout 5s --health-retries 30
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-dotnet@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: "10.0.x"
       - name: Tests d'intégration
@@ -113,11 +113,11 @@ jobs:
     name: Audit des dépendances
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-dotnet@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: "10.0.x"
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
       - run: dotnet restore HomeGed.slnx
@@ -144,9 +144,9 @@ jobs:
           - { name: home-ged, context: ., file: Dockerfile }
           - { name: home-ged-backup, context: deploy/backup, file: deploy/backup/Dockerfile }
     steps:
-      - uses: actions/checkout@v5
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.image.context }}
           file: ${{ matrix.image.file }}
